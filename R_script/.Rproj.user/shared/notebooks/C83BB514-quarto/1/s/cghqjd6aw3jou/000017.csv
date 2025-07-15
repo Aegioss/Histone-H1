@@ -1,0 +1,2 @@
+"0","cyto <- keepSeqlevels(cyto, mus_chrs, pruning.mode=""coarse"")"
+"0","kp <- plotKaryotype(plot.type=6, genome = custom.genome, cytobands = cyto, chromosomes=mus_chrs, cex=1)"

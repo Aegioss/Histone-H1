@@ -1,0 +1,6 @@
+"0",""
+"0","ggplot(top_downregTTC1Removed.G, aes(x = gene, y = log2FoldChange)) +"
+"0","  geom_bar(stat = ""identity"", fill = ""firebrick"") +  "
+"0","  coord_flip() +"
+"0","  labs(title = ""Most Downregulated Genes [Bowtie TTseq C1 Removed]"", x = ""Gene"", y = ""log2 Fold Change"") +"
+"0","  theme_minimal()"

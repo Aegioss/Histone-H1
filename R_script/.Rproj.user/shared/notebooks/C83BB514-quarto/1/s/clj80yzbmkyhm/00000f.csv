@@ -1,0 +1,10 @@
+"0","vc_down <- vennCounts(rnaC1_vs_ttC1_down)"
+"0","print(vc_down)"
+"1","  RNA TT Counts
+1   0  0  55463
+2   0  1     16
+3   1  0      6
+4   1  1      2
+attr(,""class"")
+[1] ""VennCounts""
+"

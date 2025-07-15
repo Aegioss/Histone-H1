@@ -1,0 +1,31 @@
+"0","ddsTxiTT <- DESeqDataSetFromTximport(txi_tx,"
+"0","                                   colData = rnaseq_description,"
+"0","                                   design = ~ Colonies + Genotype)"
+"2","G2;H2;Warningh in DESeqDataSet(se, design = design, ignoreRank) :
+  some variables in design formula are characters, converting to factorsg
+"
+"2","G3;factor levels were dropped which had no samples
+g"
+"2","G3;using counts and average transcript lengths from tximport
+g"
+"0","ddsTxiTT <- estimateSizeFactors(ddsTxiTT, controlGenes = grepl(""^FBtr|^PreMrnaDroso"", rownames(ddsTxiTT)))"
+"2","G3;using 'avgTxLength' from assays(dds), correcting for library size
+g"
+"0","premrna_id <- rownames(ddsTxiTT[grepl(""^PreMrnaENS"", rownames(ddsTxiTT))])"
+"0","premrna_id <- c(premrna_id, mono_exon_id)"
+"0","ddsTxiTT <- DESeq(ddsTxiTT[rownames(ddsTxiTT) %in% premrna_id,])"
+"2","G3;using pre-existing normalization factors
+g"
+"2","G3;estimating dispersions
+g"
+"2","G3;gene-wise dispersion estimates
+g"
+"2","G3;mean-dispersion relationship
+g"
+"2","G3;final dispersion estimates
+g"
+"2","G3;fitting model and testing
+g"
+"0","resultsNames(ddsTxiTT)"
+"1","[1] ""Intercept""          ""Colonies_C2_vs_C1""  ""Genotype_LOW_vs_WT""
+"

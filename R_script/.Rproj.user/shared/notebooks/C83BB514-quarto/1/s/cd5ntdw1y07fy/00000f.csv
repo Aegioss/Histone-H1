@@ -1,0 +1,20 @@
+"0","transcript_density <- TPM %>%"
+"0","  group_by(gene_id) %>%"
+"0","  summarise(count = n()) %>%"
+"0","  as.data.frame()"
+"0",""
+"0","rownames(transcript_density) <- transcript_density$gene_id"
+"0","colnames(transcript_density)[2] <- ""score"""
+"0","transcript_density$gene_id <- NULL"
+"0","trdf <- DataFrame(transcript_density)"
+"0","head(trdf)"
+"1","DataFrame with 6 rows and 1 column
+                          score
+                      <integer>
+ENSMUSG00000000001.4          2
+ENSMUSG00000000003.15         3
+ENSMUSG00000000028.15         5
+ENSMUSG00000000031.16         8
+ENSMUSG00000000037.17        10
+ENSMUSG00000000049.11         5
+"

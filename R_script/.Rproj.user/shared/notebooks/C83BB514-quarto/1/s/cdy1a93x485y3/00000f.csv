@@ -1,0 +1,8 @@
+"0",""
+"0","RnaUpReg <- RnaResVocPlot[RnaResVocPlot$diffexpressed==""UP"",][,1:6]"
+"0","RnaDownReg <- RnaResVocPlot[RnaResVocPlot$diffexpressed==""DOWN"",][,1:6]"
+"0",""
+"0","RnaUpReg$neg_log10_padj <- -log10(RnaUpReg$padj)"
+"0","RnaDownReg$neg_log10_padj <- -log10(RnaDownReg$padj)"
+"0","RnaUpRegSorted <- RnaUpReg[order(-RnaUpReg$log2FoldChange, -RnaUpReg$neg_log10_padj),]"
+"0","RnaDownRegSorted <- RnaDownReg[order(RnaDownReg$log2FoldChange, -RnaDownReg$neg_log10_padj),]"

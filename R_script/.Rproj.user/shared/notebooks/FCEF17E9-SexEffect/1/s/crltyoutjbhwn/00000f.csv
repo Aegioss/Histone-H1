@@ -1,0 +1,7 @@
+"0","ttseq_description_WT <- ttseq_description[ttseq_description$Genotype==""WT"",]"
+"0","bowtie_ttseq_WT <- bowtie_ttseq[, rownames(ttseq_description_WT)]"
+"0",""
+"0",""
+"0","ttseq_description_LOW <- ttseq_description[ttseq_description$Genotype==""LOW"",]"
+"0","bowtie_ttseq_LOW <- bowtie_ttseq[, rownames(ttseq_description_LOW)]"
+"0",""

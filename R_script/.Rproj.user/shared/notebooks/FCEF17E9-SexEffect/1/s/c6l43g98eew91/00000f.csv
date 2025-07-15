@@ -1,0 +1,19 @@
+"0","tt_dds_WT <- DESeqDataSetFromMatrix(countData = bowtie_ttseq_WT,"
+"0","                              colData = ttseq_description_WT,"
+"0","                              design = ~ Colonies)"
+"0","tt_dds_WT <- estimateSizeFactors(tt_dds_WT, controlGenes = grepl(""Droso_"", rownames(bowtie_ttseq_WT)))"
+"0","tt_dds_WT <- DESeq(tt_dds_WT[grepl(""^ENS"", rownames(bowtie_ttseq_WT))])"
+"2","G3;using pre-existing size factors
+g"
+"2","G3;estimating dispersions
+g"
+"2","G3;gene-wise dispersion estimates
+g"
+"2","G3;mean-dispersion relationship
+g"
+"2","G3;final dispersion estimates
+g"
+"2","G3;fitting model and testing
+g"
+"0","tt_res_WT <- results(tt_dds_WT, contrast=c(""Colonies"",""C1"",""C2""))"
+"0","tt_resNoNa_WT <- tt_res_WT[!is.na(tt_res_WT$padj) & !is.na(tt_res_WT$log2FoldChange), ]"

@@ -1,0 +1,4 @@
+"0","TTdegs <- c(rownames(TTBowtieDownRegSorted), rownames(TTBowtieUpRegSorted))"
+"0","TT_genes <- gene_features[gene_features$gene_id %in% TTdegs]"
+"0",""
+"0","kpTr <- plotKaryotype(plot.type=1, genome = custom.genome, cytobands = cyto, chromosomes=mus_chrs, cex=1)"

@@ -1,0 +1,19 @@
+"0","rna_dds_LOW <- DESeqDataSetFromMatrix(countData = star_rnaseq_LOW,"
+"0","                              colData = rnaseq_description_LOW,"
+"0","                              design = ~ Colonies)"
+"0","rna_dds_LOW <- estimateSizeFactors(rna_dds_LOW, controlGenes = grepl(""Droso_"", rownames(star_rnaseq_LOW)))"
+"0","rna_dds_LOW <- DESeq(rna_dds_LOW[grepl(""^ENS"", rownames(star_rnaseq_LOW))])"
+"2","G3;using pre-existing size factors
+g"
+"2","G3;estimating dispersions
+g"
+"2","G3;gene-wise dispersion estimates
+g"
+"2","G3;mean-dispersion relationship
+g"
+"2","G3;final dispersion estimates
+g"
+"2","G3;fitting model and testing
+g"
+"0","rna_res_LOW <- results(rna_dds_LOW, name=""Colonies_C2_vs_C1"", contrast=c(""Colonies"",""C1"",""C2""))"
+"0","rna_resNoNa_LOW <- rna_res_LOW[!is.na(rna_res_LOW$padj) & !is.na(rna_res_LOW$log2FoldChange), ]"

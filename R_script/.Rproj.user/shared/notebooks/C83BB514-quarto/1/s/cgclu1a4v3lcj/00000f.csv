@@ -1,0 +1,16 @@
+"0","gtf_covTr <- gtf_genes[gtf_genes$gene_id %in% unique(MusGeneNames$gene_id)]"
+"0","mcols(gtf_covTr) <- mcols(gtf_covTr)[, ""gene_id"", drop = FALSE]"
+"0","mcols(gtf_covTr) <- trdf[gtf_covTr$gene_id, colnames(trdf)]"
+"0","head(gtf_covTr)"
+"1","GRanges object with 6 ranges and 1 metadata column:
+      seqnames              ranges strand |         X
+         <Rle>           <IRanges>  <Rle> | <integer>
+  [1]     chr3 108107280-108146146      - |         2
+  [2]     chrX   77837901-77853623      - |         3
+  [3]    chr16   18780447-18811987      - |         5
+  [4]     chr7 142575529-142578143      - |         8
+  [5]     chrX 161082525-161258213      + |        10
+  [6]    chr11 108343354-108414396      + |         5
+  -------
+  seqinfo: 71 sequences from an unspecified genome; no seqlengths
+"

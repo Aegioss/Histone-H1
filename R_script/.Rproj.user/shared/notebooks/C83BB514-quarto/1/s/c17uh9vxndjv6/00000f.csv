@@ -1,0 +1,3 @@
+"0","cyto12 <- cyto[seqnames(cyto)==""chr12""]"
+"0","chr12_gene_name <- mcols(subsetByOverlaps(TT_genes, cyto12[length(cyto12)-1], type = ""within""))$gene_name"
+"0","writeLines(chr12_gene_name, ""/home/franck/SCRATCH/fpan/Script/Analysis_image/GENE_LIST/chr12_TT_Bowtie_potential_gene.txt"")"

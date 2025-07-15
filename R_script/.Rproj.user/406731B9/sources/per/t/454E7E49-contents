@@ -1,0 +1,1243 @@
+---
+title: "SexEffect"
+format: 
+  html:
+    toc: true
+editor: visual
+---
+
+## Import Data
+
+```{r}
+library(tximport)
+library(readr)
+library(tximportData)
+library(DESeq2)
+library(GenomicRanges)
+library(dplyr)
+library(txdbmaker)
+library(viridis)
+library(patchwork)
+library(tidyverse)
+library(RColorBrewer)
+library(rtracklayer)
+library(reshape2)
+library(ggrepel)
+library(pheatmap)
+library(karyoploteR)
+```
+
+```{r}
+bowtie_matrix <- read.csv("/home/franck/SCRATCH/fpan/Genome_Index/chR_index_files/BowtieQ30_counts_matrix.csv", header = TRUE, sep = ",")
+star_matrix <- read.csv("/home/franck/SCRATCH/fpan/Genome_Index/chR_index_files/STARQ30_counts_matrix.csv", header = TRUE, sep = ",")
+description_file <- read.csv("/home/franck/SCRATCH/fpan/Genome_Index/chR_index_files/Ashish.SampleDescription.csv", header = TRUE, sep = ",")
+gtf_file <- import("/home/franck/SCRATCH/fpan/Genome_Index/chR_index_files/chR_TrExAdded.gtf")
+latest_gtf <- import("/home/franck/SCRATCH/fpan/Genome_Index/chR_index_files/rsem_9_06_25_filtered.gtf")
+```
+
+```{r}
+description_file$Genotype <- factor(description_file$Genotype, levels = c("WT", "LOW", "GapRWT"))
+description_file$Colonies <- factor(description_file$Colonies, levels = c("C1", "C2"))
+colnames(bowtie_matrix)[grepl("^RNA", colnames(bowtie_matrix))] <- 
+  gsub("B.*$", "", colnames(bowtie_matrix)[grepl("^RNA", colnames(bowtie_matrix))])
+colnames(star_matrix)[grepl("^RNA", colnames(star_matrix))] <- 
+  gsub("Star.*$", "", colnames(star_matrix)[grepl("^RNA", colnames(star_matrix))])
+rownames(description_file) <- colnames(star_matrix)[grepl("^RNA", colnames(star_matrix))]
+description_file$sample_name <- rownames(description_file)
+rownames(star_matrix) <- star_matrix$X
+rownames(bowtie_matrix) <- bowtie_matrix$X
+star_matrix <- star_matrix[, -1]
+bowtie_matrix <- bowtie_matrix[, -1]
+```
+
+```{r}
+head(star_matrix)
+head(bowtie_matrix)
+head(description_file)
+```
+
+```{r}
+rnaseq_description <- description_file[1:12,]
+ttseq_description <- description_file[13:24,]
+
+star_rnaseq <- star_matrix[, rownames(rnaseq_description)]
+
+star_ttseq <- star_matrix[, rownames(ttseq_description)]
+bowtie_ttseq <- bowtie_matrix[, rownames(ttseq_description)]
+
+
+head(star_ttseq)
+head(bowtie_ttseq)
+ttseq_description
+```
+
+```{r}
+gtf_genes <- gtf_file[gtf_file$type == "gene", ]
+MusMusculus_Genes <- gtf_genes[grep("^ENS", gtf_genes$gene_id), ]
+MusGeneNames <- unique(data.frame(mcols(MusMusculus_Genes[,c("gene_id", "gene_name")])))
+head(MusGeneNames)
+```
+
+```{r}
+base_dir <- "/home/franck/SCRATCH/fpan/Genome_Index/chR_index_files/SalmonRNA/QuantOutput_gcBias"
+files <- file.path(base_dir, paste0(rnaseq_description$sample_name, "_quant"), "quant.sf")
+names(files) <- rnaseq_description$sample_name
+tx2gene <- read_csv(file.path(base_dir, "tx2gene.rsem.filtered.csv"), show_col_types = FALSE)
+txi_tx <- tximport(files, type="salmon", txOut=TRUE)
+head(tx2gene)
+```
+
+```{r}
+TTbase_dir <- "/home/franck/SCRATCH/fpan/Genome_Index/chR_index_files/SalmonTT/QuantOutput"
+TTfiles <- file.path(TTbase_dir, paste0(ttseq_description$sample_name, "_quant"), "quant.sf")
+names(TTfiles) <- ttseq_description$sample_name
+TTtx2gene <- read_csv(file.path(base_dir, "tx2gene.rsem.filtered.csv"), show_col_types = FALSE)
+TTtxi_tx <- tximport(TTfiles, type="salmon", txOut=TRUE)
+head(TTtx2gene)
+```
+
+```{r}
+gtf_mono_exon <- latest_gtf
+exons_gtf <- gtf_mono_exon[gtf_mono_exon$type == "exon"]
+df_subset <- as.data.frame(exons_gtf)
+
+exon_counts <- df_subset %>%
+  group_by(transcript_id) %>%
+  summarise(exon_count = n()) %>%
+  filter(exon_count == 1)
+mono_exon_id <- exon_counts$transcript_id
+mono_exon_id <- mono_exon_id[grepl("^ENS", mono_exon_id)]
+```
+
+```{r}
+input_chromosome_reads <- read.csv("/home/franck/SCRATCH/fpan/INPUT_WORK/H1_TFs_ChIP/INPUT_CHR_READS_DIST.csv", header = TRUE, sep = "\t")
+desired_order <- c(paste0("chr", c(1:19, "X", "Y", "M", "R")), "Total")
+input_chromosome_reads$Chr <- factor(input_chromosome_reads$Chr, levels = desired_order, ordered = TRUE)
+input_chromosome_reads <- input_chromosome_reads[order(input_chromosome_reads$Chr),]
+input_chromosome_reads[nrow(input_chromosome_reads)+1,] <- c("Total", colSums(input_chromosome_reads[,-1]))
+rownames(input_chromosome_reads) <- input_chromosome_reads$Chr
+input_chromosome_reads <- input_chromosome_reads[,-1]
+colnames(input_chromosome_reads) <- sub(".*H1_(.*)_Interphase.*", "\\1", colnames(input_chromosome_reads))
+input_chromosome_reads
+```
+
+```{r}
+input_long <- input_chromosome_reads %>%
+  rownames_to_column("Chromosome") %>%
+  pivot_longer(cols = -Chromosome, names_to = "Sample", values_to = "ReadCount")
+input_long$Condition <- ifelse(grepl("LOW", input_long$Sample), "LOW", "WT")
+input_long$ReadCount <-  as.numeric(as.character(input_long$ReadCount))
+```
+
+# Quantification of reads
+
+```{r}
+input_long_Y <- input_long[input_long$Chromosome=="chrY",]
+input_long_Y <- input_long_Y[order(input_long_Y$Condition, input_long_Y$ReadCount),]
+
+y1 <- ggplot(data = input_long_Y[input_long_Y$Condition=="WT",], aes(x = Sample, y = ReadCount)) +
+  geom_bar(stat = "identity", show.legend = FALSE, fill = "steelblue") +
+  scale_x_discrete(guide = guide_axis(angle = 45)) +
+  theme_classic()
+
+y2 <- ggplot(data = input_long_Y[input_long_Y$Condition=="LOW",], aes(x = Sample, y = ReadCount)) +
+  geom_bar(stat = "identity", show.legend = FALSE, fill = "firebrick") +
+  scale_x_discrete(guide = guide_axis(angle = 45)) +
+  theme_classic()
+y1 + y2
+
+```
+
+```{r}
+input_long_X <- input_long[input_long$Chromosome=="chrX",]
+input_long_X <- input_long_X[order(input_long_X$Condition, input_long_X$ReadCount),]
+
+x1 <- ggplot(data = input_long_X[input_long_X$Condition=="WT",], aes(x = Sample, y = ReadCount)) +
+  geom_bar(stat = "identity", show.legend = FALSE, fill = "steelblue") +
+  scale_x_discrete(guide = guide_axis(angle = 45)) +
+  labs( x = expression("Sample"), 
+        y = expression("# Reads To chrX")) + 
+  theme_classic()
+
+x2 <- ggplot(data = input_long_X[input_long_X$Condition=="LOW",], aes(x = Sample, y = ReadCount)) +
+  geom_bar(stat = "identity", show.legend = FALSE, fill = "firebrick") +
+  scale_x_discrete(guide = guide_axis(angle = 45)) +
+    labs( x = expression("Sample"), 
+        y = expression("# Reads To chrX")) + 
+  theme_classic()
+x1 + x2
+```
+
+```{r}
+y1+y2+x1+x2
+```
+
+# RNA-seq by Colony
+
+```{r}
+rnaseq_description_WT <- rnaseq_description[rnaseq_description$Genotype=="WT",]
+star_rnaseq_WT <- star_matrix[, rownames(rnaseq_description_WT)]
+
+
+rnaseq_description_LOW <- rnaseq_description[rnaseq_description$Genotype=="LOW",]
+star_rnaseq_LOW <- star_matrix[, rownames(rnaseq_description_LOW)]
+
+```
+
+## WT
+
+```{r}
+rna_dds_WT <- DESeqDataSetFromMatrix(countData = star_rnaseq_WT,
+                              colData = rnaseq_description_WT,
+                              design = ~ Colonies)
+rna_dds_WT <- estimateSizeFactors(rna_dds_WT, controlGenes = grepl("Droso_", rownames(star_rnaseq_WT)))
+rna_dds_WT <- DESeq(rna_dds_WT[grepl("^ENS", rownames(star_rnaseq_WT))])
+rna_res_WT <- results(rna_dds_WT, contrast=c("Colonies","C1","C2"))
+rna_resNoNa_WT <- rna_res_WT[!is.na(rna_res_WT$padj) & !is.na(rna_res_WT$log2FoldChange), ]
+```
+
+##### MA Plot
+
+```{r}
+mus_chrs <- c(paste0("chr", 1:19), "chrX", "chrY")
+filtered_gtf <- latest_gtf[seqnames(latest_gtf) %in% mus_chrs]
+gene_features <- filtered_gtf[filtered_gtf$type == "gene"]
+
+plotMA(rna_resNoNa_WT)
+
+x_genes <- gene_features[seqnames(gene_features)=="chrX"]
+y_genes <- gene_features[seqnames(gene_features)=="chrY"]
+autosomal_genes <-  gene_features[!(seqnames(gene_features)=="chrY" & seqnames(gene_features)=="chrX")]
+
+foldchange_threeshold <- 0.6
+padj_threeshold <- 0.05
+
+rna_resNoNa_WT$significant <- "Not Significant"
+rna_resNoNa_WT$significant[rna_resNoNa_WT$padj < padj_threeshold] <- "Significant"
+
+ggplot(rna_resNoNa_WT, aes(x = baseMean, y = log2FoldChange, col = significant)) +
+  geom_point(size = 1) +
+  coord_cartesian(ylim = c(-17, 17)) +
+  labs( title = "MA Plot from STAR RNA-seq WT-Colonies",
+        color = 'Category',
+        x = expression("BaseMean Of Normalized Counts"), 
+        y = expression("Log"[2]*" Fold Change")) + 
+  scale_x_log10() +
+  geom_hline(yintercept = 0, col = "black", linetype = 'dashed', linewidth = 1) +
+  theme_classic() +
+  scale_color_manual(values = c("darkgrey", "blue"),
+                     labels = c("Not Significant", "Significant"))
+
+ggplot((rna_resNoNa_WT[rna_resNoNa_WT$index %in% x_genes$gene_id,]), aes(x = baseMean, y = log2FoldChange, col = significant)) +
+  geom_point(size = 1) +
+  coord_cartesian(ylim = c(-17, 17)) +
+  labs( title = "MA Plot from STAR RNA-seq WT-Colonies (chrX only)",
+        color = 'Category',
+        x = expression("BaseMean Of Normalized Counts"), 
+        y = expression("Log"[2]*" Fold Change")) + 
+  scale_x_log10() +
+  geom_hline(yintercept = 0, col = "black", linetype = 'dashed', linewidth = 1) +
+  theme_classic() +
+  scale_color_manual(values = c("darkgrey", "blue"),
+                     labels = c("Not Significant", "Significant"))
+
+ggplot((rna_resNoNa_WT[rna_resNoNa_WT$index %in% y_genes$gene_id,]), aes(x = baseMean, y = log2FoldChange, col = significant)) +
+  geom_point(size = 1) +
+  coord_cartesian(ylim = c(-17, 17)) +
+  labs( title = "MA Plot from STAR RNA-seq WT-Colonies (chrY only)",
+        color = 'Category',
+        x = expression("BaseMean Of Normalized Counts"), 
+        y = expression("Log"[2]*" Fold Change")) + 
+  scale_x_log10() +
+  geom_hline(yintercept = 0, col = "black", linetype = 'dashed', linewidth = 1) +
+  theme_classic() +
+  scale_color_manual(values = c("darkgrey", "blue"),
+                     labels = c("Not Significant", "Significant"))
+
+ggplot((rna_resNoNa_WT[rna_resNoNa_WT$index %in% autosomal_genes$gene_id,]), aes(x = baseMean, y = log2FoldChange, col = significant)) +
+  geom_point(size = 1) +
+  coord_cartesian(ylim = c(-17, 17)) +
+  labs( title = "MA Plot from STAR RNA-seq WT-Colonies (autosomal chr only)",
+        color = 'Category',
+        x = expression("BaseMean Of Normalized Counts"), 
+        y = expression("Log"[2]*" Fold Change")) + 
+  scale_x_log10() +
+  geom_hline(yintercept = 0, col = "black", linetype = 'dashed', linewidth = 1) +
+  theme_classic() +
+  scale_color_manual(values = c("darkgrey", "blue"),
+                     labels = c("Not Significant", "Significant"))
+```
+
+##### QQ Plot
+
+```{r}
+rna_resNoNa_WT$PvalueSorted <- -log10(sort(rna_resNoNa_WT$pvalue))
+rna_resNoNa_WT$PvalueExpected <- -log10(ppoints(length(rna_resNoNa_WT$PvalueSorted)))
+
+
+ggplot(rna_resNoNa_WT, aes(PvalueSorted, PvalueExpected)) +
+  geom_point(size = 1) +
+    geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "gray") +
+  labs(title = "QQ Plot of STAR RNA-seq WT-Colonies",
+       x = expression("Observed -Log"[10]*" pvalue"), 
+       y = expression("Expected -Log"[10]*" pvalue")) + 
+  scale_x_log10() +
+  scale_y_log10() +
+  theme_classic()
+
+```
+
+##### Volcano Plot
+
+```{r}
+rna_WT_VocPlot <- rna_resNoNa_WT[order(rna_resNoNa_WT$padj),]
+rna_WT_VocPlot$diffexpressed <- "NO"
+rna_WT_VocPlot$diffexpressed[rna_WT_VocPlot$log2FoldChange > foldchange_threeshold & rna_WT_VocPlot$padj < padj_threeshold] <- "UP"
+rna_WT_VocPlot$diffexpressed[rna_WT_VocPlot$log2FoldChange < -foldchange_threeshold & rna_WT_VocPlot$padj < padj_threeshold] <- "DOWN"
+
+ggplot(data = rna_WT_VocPlot, 
+       aes(x = log2FoldChange, y = -log10(padj), col = diffexpressed)) +
+  geom_vline(xintercept = c(-foldchange_threeshold, foldchange_threeshold), col = "gray", linetype = 'dashed') +
+  geom_hline(yintercept = -log10(padj_threeshold), col = "gray", linetype = 'dashed') +
+  labs(title="Volcano Plot Of STAR RNA-seq WT-Colonies",
+       color = 'Category',  
+       x = expression("log"[2]*"(FC)"), 
+       y = expression("-log"[10]*"(padj)")) + 
+  scale_x_continuous(breaks = seq(-14, 14, 2)) +
+  geom_point(size = 1) +
+  scale_color_manual(values = c("#00AFBB", "grey", "#FFDB6D"),
+                     labels = c("Downregulated", "Not significant", "Upregulated"))+
+  theme_classic()
+```
+
+##### Bar Plot Top 20 Degs
+
+```{r}
+rna_WT_UpReg <- rna_WT_VocPlot[rna_WT_VocPlot$diffexpressed=="UP",][,1:6]
+rna_WT_DownReg <- rna_WT_VocPlot[rna_WT_VocPlot$diffexpressed=="DOWN",][,1:6]
+
+rna_WT_UpReg$neg_log10_padj <- -log10(rna_WT_UpReg$padj)
+rna_WT_DownReg$neg_log10_padj <- -log10(rna_WT_DownReg$padj)
+rna_WT_UpRegSorted <- rna_WT_UpReg[order(-rna_WT_UpReg$log2FoldChange, -rna_WT_UpReg$neg_log10_padj),]
+rna_WT_DownRegSorted <- rna_WT_DownReg[order(rna_WT_DownReg$log2FoldChange, -rna_WT_DownReg$neg_log10_padj),]
+rna_WT_UpRegSortedTop <- head(rna_WT_UpRegSorted, 50)
+rna_WT_DownRegSortedTop <- head(rna_WT_DownRegSorted, 50)
+
+rna_WT_UpRegSortedTop$gene <- MusGeneNames$gene_name[match(rownames(rna_WT_UpRegSortedTop), MusGeneNames$gene_id)]
+rna_WT_UpRegSortedTop$gene <- factor(rna_WT_UpRegSortedTop$gene, levels = rev(rna_WT_UpRegSortedTop$gene))
+rna_WT_DownRegSortedTop$gene <- MusGeneNames$gene_name[match(rownames(rna_WT_DownRegSortedTop), MusGeneNames$gene_id)]
+rna_WT_DownRegSortedTop$gene <- factor(rna_WT_DownRegSortedTop$gene, levels = rev(rna_WT_DownRegSortedTop$gene))
+
+
+ggplot(rna_WT_UpRegSortedTop, aes(x = gene, y = log2FoldChange)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  coord_flip() +
+  labs(title = "Most Upregulated Genes [STAR RNA-seq WT-Colonies]", x = "Gene", y = "log2 Fold Change") +
+  theme_minimal()
+
+ggplot(rna_WT_DownRegSortedTop, aes(x = gene, y = log2FoldChange)) +
+  geom_bar(stat = "identity", fill = "firebrick") +  
+  coord_flip() +
+  labs(title = "Most Downregulated Genes [STAR RNA-seq WT-Colonies]", x = "Gene", y = "log2 Fold Change") +
+  theme_minimal()
+```
+
+#####Scatter Plot Mean Expression
+
+```{r}
+rna_dds_WT_normalized <- data.frame(counts(rna_dds_WT, normalize=TRUE))
+rna_dds_WT_normalized$C1_Mean <- unlist(apply(rna_dds_WT_normalized[,rownames(rnaseq_description_WT[rnaseq_description_WT$Colonies=="C1",])], 1, mean))
+rna_dds_WT_normalized$C2_Mean <- unlist(apply(rna_dds_WT_normalized[,rownames(rnaseq_description_WT[rnaseq_description_WT$Colonies=="C2",])], 1, mean))
+rna_dds_WT_normalized$C1_std <- unlist(apply(rna_dds_WT_normalized[,rownames(rnaseq_description_WT[rnaseq_description_WT$Colonies=="C1",])], 1, sd))
+rna_dds_WT_normalized$C2_std <- unlist(apply(rna_dds_WT_normalized[,rownames(rnaseq_description_WT[rnaseq_description_WT$Colonies=="C2",])], 1, sd))
+
+rna_dds_WT_normalized_filtered <- rna_dds_WT_normalized %>% filter(C1_Mean > 0,
+                                                        (C1_Mean - C1_std > 0),
+                                                        C2_Mean > 0,
+                                                        (C2_Mean - C2_std > 0))
+rna_resNoNa_WT$index <- rownames(rna_resNoNa_WT)
+rna_dds_WT_normalized_filtered$index <- rownames(rna_dds_WT_normalized_filtered)
+rna_dds_WT_normalized_filtered <- merge(rna_dds_WT_normalized_filtered, data.frame(rna_resNoNa_WT[,c(7,10)]), by="index")
+rownames(rna_dds_WT_normalized_filtered) <- rna_dds_WT_normalized_filtered$index
+rna_dds_WT_normalized_filtered <- rna_dds_WT_normalized_filtered[,2:length(rna_dds_WT_normalized_filtered)]
+
+
+ggplot(rna_dds_WT_normalized_filtered, aes(x= C1_Mean, y= C2_Mean, col = significant)) +
+  geom_point(size=1, alpha = 0.6) +
+  scale_y_log10() +
+  scale_x_log10() +
+  labs( title = "Scatter plot of STAR RNA-seq WT-Colonies",
+        color = 'Category',
+        x = expression("Log"[10]*"(meanExpression) in C1"), 
+        y = expression("Log"[10]*"(meanExpression) in C2")) + 
+  geom_density2d(col="red") +
+  scale_color_manual(values = c("black", "blue"),
+                     labels = c("Not Significant", "Significant"))+
+  #geom_errorbar(data = TTseqC1RemovedNormalizedFiltered.G[1:50,] ,aes(ymin = LOW_Mean - LOW_std, ymax = LOW_Mean + LOW_std), width = 0.1, alpha = 0.2) +
+  #geom_errorbarh(aes(xmin = WT_Mean - WT_std, xmax = WT_Mean + WT_std), height = 0.1, alpha = 0.2) +
+  theme_classic()
+```
+
+##### Correlation Matrix SSample
+
+```{r}
+annotation <- data.frame(Genotype = rnaseq_description_WT$Colonies)
+rownames(annotation) <- rownames(rnaseq_description_WT)
+
+spearman_correlation_matrix <- cor(rna_dds_WT_normalized[,grepl("^RNA", colnames(rna_dds_WT_normalized))], method = "spearman")
+dist_from_spearman <- as.dist(1-spearman_correlation_matrix)
+dist_matrix <- as.matrix(dist_from_spearman)
+
+pheatmap(dist_matrix, 
+         clustering_distance_rows = dist_from_spearman,
+         clustering_distance_cols = dist_from_spearman,
+         annotation_row = annotation,
+         annotation_col = annotation,
+         col = plasma(256))
+
+```
+
+```{r}
+rna_dds_WT_normalized$gene_name <- rownames(rna_dds_WT_normalized)
+rna_dds_WT_normalized_long <- 
+  melt(rna_dds_WT_normalized[,grepl("^RNA", colnames(rna_dds_WT_normalized)) | colnames(rna_dds_WT_normalized) == "gene_name"],
+  id.vars = "gene_name",
+  variable_name = "sample_name")
+colnames(rna_dds_WT_normalized_long)[2] <- "sample_name"
+colnames(rna_dds_WT_normalized_long)[3] <- "normalized_count"
+rna_dds_WT_normalized_long <- merge(rna_dds_WT_normalized_long, rnaseq_description_WT, by="sample_name")
+head(rna_dds_WT_normalized_long)
+```
+
+##### Top 10 Up Degs Bar Plot
+
+```{r}
+rna_WT_UpReg10 <- rownames(rna_WT_UpRegSortedTop[1:10,])
+for (gene in rna_WT_UpReg10) {
+  p <- ggplot(rna_dds_WT_normalized_long[rna_dds_WT_normalized_long$gene_name == gene, ],
+              aes(x = Colonies, y = normalized_count)) +
+    geom_boxplot(width = 0.1, alpha = 0.5, aes(fill = Colonies)) +
+    geom_jitter(aes(colour = Replicate), width = 0.2, size = 1.5) +
+    labs(title = paste("Expression of", 
+                       MusGeneNames$gene_name[MusGeneNames$gene_id == gene]),
+         y = expression("Normalized Counts"),
+         x = "Colonies") +
+    theme_classic()
+  print(p)
+}
+
+```
+
+##### Top 10 Down Degs Bar Plot
+
+```{r}
+rna_WT_DownReg10 <- rownames(rna_WT_DownRegSortedTop[1:10,])
+for (gene in rna_WT_DownReg10) {
+  p <- ggplot(rna_dds_WT_normalized_long[rna_dds_WT_normalized_long$gene_name == gene, ],
+              aes(x = Colonies, y = normalized_count)) +
+    geom_boxplot(width = 0.1, alpha = 0.5, aes(fill = Colonies)) +
+    geom_jitter(aes(colour = Replicate), width = 0.2, size = 1.5) +
+    labs(title = paste("Expression of", 
+                       MusGeneNames$gene_name[MusGeneNames$gene_id == gene]),
+         y = expression("Normalized Counts"),
+         x = "Colonies") +
+    theme_classic()
+  print(p)
+}
+```
+
+## LOW
+
+```{r}
+rna_dds_LOW <- DESeqDataSetFromMatrix(countData = star_rnaseq_LOW,
+                              colData = rnaseq_description_LOW,
+                              design = ~ Colonies)
+rna_dds_LOW <- estimateSizeFactors(rna_dds_LOW, controlGenes = grepl("Droso_", rownames(star_rnaseq_LOW)))
+rna_dds_LOW <- DESeq(rna_dds_LOW[grepl("^ENS", rownames(star_rnaseq_LOW))])
+rna_res_LOW <- results(rna_dds_LOW, name="Colonies_C2_vs_C1", contrast=c("Colonies","C1","C2"))
+rna_resNoNa_LOW <- rna_res_LOW[!is.na(rna_res_LOW$padj) & !is.na(rna_res_LOW$log2FoldChange), ]
+```
+
+##### MA Plot
+
+```{r}
+plotMA(rna_resNoNa_LOW)
+
+foldchange_threeshold <- 0.6
+padj_threeshold <- 0.05
+
+rna_resNoNa_LOW$significant <- "Not Significant"
+rna_resNoNa_LOW$significant[rna_resNoNa_LOW$padj < padj_threeshold] <- "Significant"
+
+ggplot(rna_resNoNa_LOW, aes(x =baseMean, 
+                       y = log2FoldChange, 
+                       col = significant)) +
+  geom_point(size = 1) +
+  coord_cartesian(ylim = c(-17, 17)) +
+  labs( title = "MA Plot from STAR RNA-seq LOW-Colonies",
+        color = 'Category',
+        x = expression("BaseMean Of Normalized Counts"), 
+        y = expression("Log"[2]*" Fold Change")) + 
+  scale_x_log10() +
+  geom_hline(yintercept = 0, col = "black", linetype = 'dashed', linewidth = 1) +
+  theme_classic() +
+  scale_color_manual(values = c("darkgrey", "blue"),
+                     labels = c("Not Significant", "Significant"))
+
+ggplot((rna_resNoNa_LOW[rna_resNoNa_LOW$index %in% x_genes$gene_id,]), aes(x = baseMean, y = log2FoldChange, col = significant)) +
+  geom_point(size = 1) +
+  coord_cartesian(ylim = c(-17, 17)) +
+  labs( title = "MA Plot from STAR RNA-seq LOW-Colonies (chrX only)",
+        color = 'Category',
+        x = expression("BaseMean Of Normalized Counts"), 
+        y = expression("Log"[2]*" Fold Change")) + 
+  scale_x_log10() +
+  geom_hline(yintercept = 0, col = "black", linetype = 'dashed', linewidth = 1) +
+  theme_classic() +
+  scale_color_manual(values = c("darkgrey", "blue"),
+                     labels = c("Not Significant", "Significant"))
+
+ggplot((rna_resNoNa_LOW[rna_resNoNa_LOW$index %in% y_genes$gene_id,]), aes(x = baseMean, y = log2FoldChange, col = significant)) +
+  geom_point(size = 1) +
+  coord_cartesian(ylim = c(-17, 17)) +
+  labs( title = "MA Plot from STAR RNA-seq LOW-Colonies (chrY only)",
+        color = 'Category',
+        x = expression("BaseMean Of Normalized Counts"), 
+        y = expression("Log"[2]*" Fold Change")) + 
+  scale_x_log10() +
+  geom_hline(yintercept = 0, col = "black", linetype = 'dashed', linewidth = 1) +
+  theme_classic() +
+  scale_color_manual(values = c("darkgrey", "blue"),
+                     labels = c("Not Significant", "Significant"))
+  
+  
+ggplot((rna_resNoNa_LOW[rna_resNoNa_LOW$index %in% autosomal_genes$gene_id,]), aes(x = baseMean, y = log2FoldChange, col = significant)) +
+  geom_point(size = 1) +
+  coord_cartesian(ylim = c(-17, 17)) +
+  labs( title = "MA Plot from STAR RNA-seq LOW-Colonies (autosomal chr only)",
+        color = 'Category',
+        x = expression("BaseMean Of Normalized Counts"), 
+        y = expression("Log"[2]*" Fold Change")) + 
+  scale_x_log10() +
+  geom_hline(yintercept = 0, col = "black", linetype = 'dashed', linewidth = 1) +
+  theme_classic() +
+  scale_color_manual(values = c("darkgrey", "blue"),
+                     labels = c("Not Significant", "Significant"))
+```
+
+##### QQ Plot
+
+```{r}
+rna_resNoNa_LOW$PvalueSorted <- -log10(sort(rna_resNoNa_LOW$pvalue))
+rna_resNoNa_LOW$PvalueExpected <- -log10(ppoints(length(rna_resNoNa_LOW$PvalueSorted)))
+
+
+ggplot(rna_resNoNa_LOW, aes(PvalueSorted, PvalueExpected)) +
+  geom_point(size = 1) +
+    geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "gray") +
+  labs(title = "QQ Plot of STAR RNA-seq WT-Colonies",
+       x = expression("Observed -Log"[10]*" pvalue"), 
+       y = expression("Expected -Log"[10]*" pvalue")) + 
+  scale_x_log10() +
+  scale_y_log10() +
+  theme_classic()
+
+```
+
+##### Volcano Plot
+
+```{r}
+rna_LOW_VocPlot <- rna_resNoNa_LOW[order(rna_resNoNa_LOW$padj),]
+rna_LOW_VocPlot$diffexpressed <- "NO"
+rna_LOW_VocPlot$diffexpressed[rna_LOW_VocPlot$log2FoldChange > foldchange_threeshold & rna_LOW_VocPlot$padj < padj_threeshold] <- "UP"
+rna_LOW_VocPlot$diffexpressed[rna_LOW_VocPlot$log2FoldChange < -foldchange_threeshold & rna_LOW_VocPlot$padj < padj_threeshold] <- "DOWN"
+
+ggplot(data = rna_LOW_VocPlot, 
+       aes(x = log2FoldChange, y = -log10(padj), col = diffexpressed)) +
+  geom_vline(xintercept = c(-foldchange_threeshold, foldchange_threeshold), col = "gray", linetype = 'dashed') +
+  geom_hline(yintercept = -log10(padj_threeshold), col = "gray", linetype = 'dashed') +
+  labs(title="Volcano Plot Of STAR RNA-seq LOW-Colonies",
+       color = 'Category',  
+       x = expression("log"[2]*"(FC)"), 
+       y = expression("-log"[10]*"(padj)")) + 
+  scale_x_continuous(breaks = seq(-14, 14, 2)) +
+  geom_point(size = 1) +
+  scale_color_manual(values = c("#00AFBB", "grey", "#FFDB6D"),
+                     labels = c("Downregulated", "Not significant", "Upregulated"))+
+  theme_classic()
+```
+
+##### Bar Plot Top 20 Degs
+
+```{r}
+rna_LOW_UpReg <- rna_LOW_VocPlot[rna_LOW_VocPlot$diffexpressed=="UP",][,1:6]
+rna_LOW_DownReg <- rna_LOW_VocPlot[rna_LOW_VocPlot$diffexpressed=="DOWN",][,1:6]
+
+rna_LOW_UpReg$neg_log10_padj <- -log10(rna_LOW_UpReg$padj)
+rna_LOW_DownReg$neg_log10_padj <- -log10(rna_LOW_DownReg$padj)
+rna_LOW_UpRegSorted <- rna_LOW_UpReg[order(-rna_LOW_UpReg$log2FoldChange, -rna_LOW_UpReg$neg_log10_padj),]
+rna_LOW_DownRegSorted <- rna_LOW_DownReg[order(rna_LOW_DownReg$log2FoldChange, -rna_LOW_DownReg$neg_log10_padj),]
+rna_LOW_UpRegSortedTop <- head(rna_LOW_UpRegSorted, 50)
+rna_LOW_DownRegSortedTop <- head(rna_LOW_DownRegSorted, 50)
+
+rna_LOW_UpRegSortedTop$gene <- MusGeneNames$gene_name[match(rownames(rna_LOW_UpRegSortedTop), MusGeneNames$gene_id)]
+rna_LOW_UpRegSortedTop$gene <- factor(rna_LOW_UpRegSortedTop$gene, levels = rev(rna_LOW_UpRegSortedTop$gene))
+rna_LOW_DownRegSortedTop$gene <- MusGeneNames$gene_name[match(rownames(rna_LOW_DownRegSortedTop), MusGeneNames$gene_id)]
+rna_LOW_DownRegSortedTop$gene <- factor(rna_LOW_DownRegSortedTop$gene, levels = rev(rna_LOW_DownRegSortedTop$gene))
+
+
+ggplot(rna_LOW_UpRegSortedTop, aes(x = gene, y = log2FoldChange)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  coord_flip() +
+  labs(title = "Most Upregulated Genes [STAR RNA-seq WT-Colonies]", x = "Gene", y = "log2 Fold Change") +
+  theme_minimal()
+
+ggplot(rna_LOW_DownRegSortedTop, aes(x = gene, y = log2FoldChange)) +
+  geom_bar(stat = "identity", fill = "firebrick") +  
+  coord_flip() +
+  labs(title = "Most Downregulated Genes [STAR RNA-seq WT-Colonies]", x = "Gene", y = "log2 Fold Change") +
+  theme_minimal()
+```
+
+#####Scatter Plot Mean Expression
+
+```{r}
+rna_dds_LOW_normalized <- data.frame(counts(rna_dds_LOW, normalize=TRUE))
+rna_dds_LOW_normalized$C1_Mean <- unlist(apply(rna_dds_LOW_normalized[,rownames(rnaseq_description_LOW[rnaseq_description_LOW$Colonies=="C1",])], 1, mean))
+rna_dds_LOW_normalized$C2_Mean <- unlist(apply(rna_dds_LOW_normalized[,rownames(rnaseq_description_LOW[rnaseq_description_LOW$Colonies=="C2",])], 1, mean))
+rna_dds_LOW_normalized$C1_std <- unlist(apply(rna_dds_LOW_normalized[,rownames(rnaseq_description_LOW[rnaseq_description_LOW$Colonies=="C1",])], 1, sd))
+rna_dds_LOW_normalized$C2_std <- unlist(apply(rna_dds_LOW_normalized[,rownames(rnaseq_description_LOW[rnaseq_description_LOW$Colonies=="C2",])], 1, sd))
+
+rna_dds_LOW_normalized_filtered <- rna_dds_LOW_normalized %>% filter(C1_Mean > 0,
+                                                        (C1_Mean - C1_std > 0),
+                                                        C2_Mean > 0,
+                                                        (C2_Mean - C2_std > 0))
+rna_resNoNa_LOW$index <- rownames(rna_resNoNa_LOW)
+rna_dds_LOW_normalized_filtered$index <- rownames(rna_dds_LOW_normalized_filtered)
+rna_dds_LOW_normalized_filtered <- merge(rna_dds_LOW_normalized_filtered, data.frame(rna_resNoNa_LOW[,c(7,10)]), by="index")
+rownames(rna_dds_LOW_normalized_filtered) <- rna_dds_LOW_normalized_filtered$index
+rna_dds_LOW_normalized_filtered <- rna_dds_LOW_normalized_filtered[,2:length(rna_dds_LOW_normalized_filtered)]
+
+
+ggplot(rna_dds_LOW_normalized_filtered, aes(x= C1_Mean, y= C2_Mean, col = significant)) +
+  geom_point(size=1, alpha = 0.6) +
+  scale_y_log10() +
+  scale_x_log10() +
+  labs( title = "Scatter plot of STAR RNA-seq WT-Colonies",
+        color = 'Category',
+        x = expression("Log"[10]*"(meanExpression) in C1"), 
+        y = expression("Log"[10]*"(meanExpression) in C2")) + 
+  geom_density2d(col="red") +
+  scale_color_manual(values = c("black", "blue"),
+                     labels = c("Not Significant", "Significant"))+
+  #geom_errorbar(data = TTseqC1RemovedNormalizedFiltered.G[1:50,] ,aes(ymin = LOW_Mean - LOW_std, ymax = LOW_Mean + LOW_std), width = 0.1, alpha = 0.2) +
+  #geom_errorbarh(aes(xmin = WT_Mean - WT_std, xmax = WT_Mean + WT_std), height = 0.1, alpha = 0.2) +
+  theme_classic()
+```
+
+##### Correlation Matrix SSample
+
+```{r}
+annotation <- data.frame(Genotype = rnaseq_description_LOW$Colonies)
+rownames(annotation) <- rownames(rnaseq_description_LOW)
+
+spearman_correlation_matrix <- cor(rna_dds_LOW_normalized[,grepl("^RNA", colnames(rna_dds_LOW_normalized))], method = "spearman")
+dist_from_spearman <- as.dist(1-spearman_correlation_matrix)
+dist_matrix <- as.matrix(dist_from_spearman)
+
+pheatmap(dist_matrix, 
+         clustering_distance_rows = dist_from_spearman,
+         clustering_distance_cols = dist_from_spearman,
+         annotation_row = annotation,
+         annotation_col = annotation,
+         col = plasma(256))
+
+```
+
+```{r}
+rna_dds_LOW_normalized$gene_name <- rownames(rna_dds_LOW_normalized)
+rna_dds_LOW_normalized_long <- 
+  melt(rna_dds_LOW_normalized[,grepl("^RNA", colnames(rna_dds_LOW_normalized)) | colnames(rna_dds_LOW_normalized) == "gene_name"],
+  id.vars = "gene_name",
+  variable_name = "sample_name")
+colnames(rna_dds_LOW_normalized_long)[2] <- "sample_name"
+colnames(rna_dds_LOW_normalized_long)[3] <- "normalized_count"
+rna_dds_LOW_normalized_long <- merge(rna_dds_LOW_normalized_long, rnaseq_description_LOW, by="sample_name")
+head(rna_dds_LOW_normalized_long)
+```
+
+##### Top 10 Up Degs Bar Plot
+
+```{r}
+rna_LOW_UpReg10 <- rownames(rna_LOW_UpRegSortedTop[1:10,])
+for (gene in rna_LOW_UpReg10) {
+  p <- ggplot(rna_dds_LOW_normalized_long[rna_dds_LOW_normalized_long$gene_name == gene, ],
+              aes(x = Colonies, y = normalized_count)) +
+    geom_boxplot(width = 0.1, alpha = 0.5, aes(fill = Colonies)) +
+    geom_jitter(aes(colour = Replicate), width = 0.2, size = 1.5) +
+    labs(title = paste("Expression of", 
+                       MusGeneNames$gene_name[MusGeneNames$gene_id == gene]),
+         y = expression("Normalized Counts"),
+         x = "Colonies") +
+    theme_classic()
+  print(p)
+}
+
+```
+
+##### Top 10 Down Degs Bar Plot
+
+```{r}
+rna_LOW_DownReg10 <- rownames(rna_LOW_DownRegSortedTop[1:10,])
+for (gene in rna_LOW_DownReg10) {
+  p <- ggplot(rna_dds_LOW_normalized_long[rna_dds_LOW_normalized_long$gene_name == gene, ],
+              aes(x = Colonies, y = normalized_count)) +
+    geom_boxplot(width = 0.1, alpha = 0.5, aes(fill = Colonies)) +
+    geom_jitter(aes(colour = Replicate), width = 0.2, size = 1.5) +
+    labs(title = paste("Expression of", 
+                       MusGeneNames$gene_name[MusGeneNames$gene_id == gene]),
+         y = expression("Normalized Counts"),
+         x = "Colonies") +
+    theme_classic()
+  print(p)
+}
+```
+
+# TT-seq by Colony
+
+```{r}
+ttseq_description_WT <- ttseq_description[ttseq_description$Genotype=="WT",]
+bowtie_ttseq_WT <- bowtie_ttseq[, rownames(ttseq_description_WT)]
+
+
+ttseq_description_LOW <- ttseq_description[ttseq_description$Genotype=="LOW",]
+bowtie_ttseq_LOW <- bowtie_ttseq[, rownames(ttseq_description_LOW)]
+
+```
+
+## WT
+
+```{r}
+tt_dds_WT <- DESeqDataSetFromMatrix(countData = bowtie_ttseq_WT,
+                              colData = ttseq_description_WT,
+                              design = ~ Colonies)
+tt_dds_WT <- estimateSizeFactors(tt_dds_WT, controlGenes = grepl("Droso_", rownames(bowtie_ttseq_WT)))
+tt_dds_WT <- DESeq(tt_dds_WT[grepl("^ENS", rownames(bowtie_ttseq_WT))])
+tt_res_WT <- results(tt_dds_WT, contrast=c("Colonies","C1","C2"))
+tt_resNoNa_WT <- tt_res_WT[!is.na(tt_res_WT$padj) & !is.na(tt_res_WT$log2FoldChange), ]
+```
+
+##### MA Plot
+
+```{r}
+plotMA(tt_resNoNa_WT)
+
+foldchange_threeshold <- 0.6
+padj_threeshold <- 0.05
+
+tt_resNoNa_WT$significant <- "Not Significant"
+tt_resNoNa_WT$significant[tt_resNoNa_WT$padj < padj_threeshold] <- "Significant"
+
+ggplot(tt_resNoNa_WT, aes(x = baseMean, 
+                       y = log2FoldChange, 
+                       col = significant)) +
+  geom_point(size = 1) +
+  coord_cartesian(ylim = c(-17, 17)) +
+  labs( title = "MA Plot from Bowtie tt-seq WT-Colonies",
+        color = 'Category',
+        x = expression("BaseMean Of Normalized Counts"), 
+        y = expression("Log"[2]*" Fold Change")) + 
+  scale_x_log10() +
+  geom_hline(yintercept = 0, col = "black", linetype = 'dashed', linewidth = 1) +
+  theme_classic() +
+  scale_color_manual(values = c("darkgrey", "blue"),
+                     labels = c("Not Significant", "Significant"))
+
+ggplot((tt_resNoNa_WT[tt_resNoNa_WT$index %in% x_genes$gene_id,]), aes(x = baseMean, y = log2FoldChange, col = significant)) +
+  geom_point(size = 1) +
+  coord_cartesian(ylim = c(-17, 17)) +
+  labs( title = "MA Plot from Bowtie tt-seq WT-Colonies (chrX only)",
+        color = 'Category',
+        x = expression("BaseMean Of Normalized Counts"), 
+        y = expression("Log"[2]*" Fold Change")) + 
+  scale_x_log10() +
+  geom_hline(yintercept = 0, col = "black", linetype = 'dashed', linewidth = 1) +
+  theme_classic() +
+  scale_color_manual(values = c("darkgrey", "blue"),
+                     labels = c("Not Significant", "Significant"))
+
+ggplot((tt_resNoNa_WT[tt_resNoNa_WT$index %in% y_genes$gene_id,]), aes(x = baseMean, y = log2FoldChange, col = significant)) +
+  geom_point(size = 1) +
+  coord_cartesian(ylim = c(-17, 17)) +
+  labs( title = "MA Plot from Bowtie tt-seq WT-Colonies (chrY only)",
+        color = 'Category',
+        x = expression("BaseMean Of Normalized Counts"), 
+        y = expression("Log"[2]*" Fold Change")) + 
+  scale_x_log10() +
+  geom_hline(yintercept = 0, col = "black", linetype = 'dashed', linewidth = 1) +
+  theme_classic() +
+  scale_color_manual(values = c("darkgrey", "blue"),
+                     labels = c("Not Significant", "Significant"))
+
+ggplot((tt_resNoNa_WT[tt_resNoNa_WT$index %in% autosomal_genes$gene_id,]), aes(x = baseMean, y = log2FoldChange, col = significant)) +
+  geom_point(size = 1) +
+  coord_cartesian(ylim = c(-17, 17)) +
+  labs( title = "MA Plot from Bowtie tt-seq WT-Colonies (autosomal chr only)",
+        color = 'Category',
+        x = expression("BaseMean Of Normalized Counts"), 
+        y = expression("Log"[2]*" Fold Change")) + 
+  scale_x_log10() +
+  geom_hline(yintercept = 0, col = "black", linetype = 'dashed', linewidth = 1) +
+  theme_classic() +
+  scale_color_manual(values = c("darkgrey", "blue"),
+                     labels = c("Not Significant", "Significant"))
+```
+
+##### QQ Plot
+
+```{r}
+tt_resNoNa_WT$PvalueSorted <- -log10(sort(tt_resNoNa_WT$pvalue))
+tt_resNoNa_WT$PvalueExpected <- -log10(ppoints(length(tt_resNoNa_WT$PvalueSorted)))
+
+
+ggplot(tt_resNoNa_WT, aes(PvalueSorted, PvalueExpected)) +
+  geom_point(size = 1) +
+    geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "gray") +
+  labs(title = "QQ Plot of Bowtie tt-seq WT-Colonies",
+       x = expression("Observed -Log"[10]*" pvalue"), 
+       y = expression("Expected -Log"[10]*" pvalue")) + 
+  scale_x_log10() +
+  scale_y_log10() +
+  theme_classic()
+
+```
+
+##### Volcano Plot
+
+```{r}
+tt_WT_VocPlot <- tt_resNoNa_WT[order(tt_resNoNa_WT$padj),]
+tt_WT_VocPlot$diffexpressed <- "NO"
+tt_WT_VocPlot$diffexpressed[tt_WT_VocPlot$log2FoldChange > foldchange_threeshold & tt_WT_VocPlot$padj < padj_threeshold] <- "UP"
+tt_WT_VocPlot$diffexpressed[tt_WT_VocPlot$log2FoldChange < -foldchange_threeshold & tt_WT_VocPlot$padj < padj_threeshold] <- "DOWN"
+
+ggplot(data = tt_WT_VocPlot, 
+       aes(x = log2FoldChange, y = -log10(padj), col = diffexpressed)) +
+  geom_vline(xintercept = c(-foldchange_threeshold, foldchange_threeshold), col = "gray", linetype = 'dashed') +
+  geom_hline(yintercept = -log10(padj_threeshold), col = "gray", linetype = 'dashed') +
+  labs(title="Volcano Plot Of Bowtie tt-seq WT-Colonies",
+       color = 'Category',  
+       x = expression("log"[2]*"(FC)"), 
+       y = expression("-log"[10]*"(padj)")) + 
+  scale_x_continuous(breaks = seq(-14, 14, 2)) +
+  geom_point(size = 1) +
+  scale_color_manual(values = c("#00AFBB", "grey", "#FFDB6D"),
+                     labels = c("Downregulated", "Not significant", "Upregulated"))+
+  theme_classic()
+```
+
+##### Bar Plot Top 20 Degs
+
+```{r}
+tt_WT_UpReg <- tt_WT_VocPlot[tt_WT_VocPlot$diffexpressed=="UP",][,1:6]
+tt_WT_DownReg <- tt_WT_VocPlot[tt_WT_VocPlot$diffexpressed=="DOWN",][,1:6]
+
+tt_WT_UpReg$neg_log10_padj <- -log10(tt_WT_UpReg$padj)
+tt_WT_DownReg$neg_log10_padj <- -log10(tt_WT_DownReg$padj)
+tt_WT_UpRegSorted <- tt_WT_UpReg[order(-tt_WT_UpReg$log2FoldChange, -tt_WT_UpReg$neg_log10_padj),]
+tt_WT_DownRegSorted <- tt_WT_DownReg[order(tt_WT_DownReg$log2FoldChange, -tt_WT_DownReg$neg_log10_padj),]
+tt_WT_UpRegSortedTop <- head(tt_WT_UpRegSorted, 50)
+tt_WT_DownRegSortedTop <- head(tt_WT_DownRegSorted, 50)
+
+tt_WT_UpRegSortedTop$gene <- MusGeneNames$gene_name[match(rownames(tt_WT_UpRegSortedTop), MusGeneNames$gene_id)]
+tt_WT_UpRegSortedTop$gene <- factor(tt_WT_UpRegSortedTop$gene, levels = rev(tt_WT_UpRegSortedTop$gene))
+tt_WT_DownRegSortedTop$gene <- MusGeneNames$gene_name[match(rownames(tt_WT_DownRegSortedTop), MusGeneNames$gene_id)]
+tt_WT_DownRegSortedTop$gene <- factor(tt_WT_DownRegSortedTop$gene, levels = rev(tt_WT_DownRegSortedTop$gene))
+
+
+ggplot(tt_WT_UpRegSortedTop, aes(x = gene, y = log2FoldChange)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  coord_flip() +
+  labs(title = "Most Upregulated Genes [Bowtie tt-seq WT-Colonies]", x = "Gene", y = "log2 Fold Change") +
+  theme_minimal()
+
+ggplot(tt_WT_DownRegSortedTop, aes(x = gene, y = log2FoldChange)) +
+  geom_bar(stat = "identity", fill = "firebrick") +  
+  coord_flip() +
+  labs(title = "Most Downregulated Genes [Bowtie tt-seq WT-Colonies]", x = "Gene", y = "log2 Fold Change") +
+  theme_minimal()
+```
+
+#####Scatter Plot Mean Expression
+
+```{r}
+tt_dds_WT_normalized <- data.frame(counts(tt_dds_WT, normalize=TRUE))
+tt_dds_WT_normalized$C1_Mean <- unlist(apply(tt_dds_WT_normalized[,rownames(ttseq_description_WT[ttseq_description_WT$Colonies=="C1",])], 1, mean))
+tt_dds_WT_normalized$C2_Mean <- unlist(apply(tt_dds_WT_normalized[,rownames(ttseq_description_WT[ttseq_description_WT$Colonies=="C2",])], 1, mean))
+tt_dds_WT_normalized$C1_std <- unlist(apply(tt_dds_WT_normalized[,rownames(ttseq_description_WT[ttseq_description_WT$Colonies=="C1",])], 1, sd))
+tt_dds_WT_normalized$C2_std <- unlist(apply(tt_dds_WT_normalized[,rownames(ttseq_description_WT[ttseq_description_WT$Colonies=="C2",])], 1, sd))
+
+tt_dds_WT_normalized_filtered <- tt_dds_WT_normalized %>% filter(C1_Mean > 0,
+                                                        (C1_Mean - C1_std > 0),
+                                                        C2_Mean > 0,
+                                                        (C2_Mean - C2_std > 0))
+tt_resNoNa_WT$index <- rownames(tt_resNoNa_WT)
+tt_dds_WT_normalized_filtered$index <- rownames(tt_dds_WT_normalized_filtered)
+tt_dds_WT_normalized_filtered <- merge(tt_dds_WT_normalized_filtered, data.frame(tt_resNoNa_WT[,c(7,10)]), by="index")
+rownames(tt_dds_WT_normalized_filtered) <- tt_dds_WT_normalized_filtered$index
+tt_dds_WT_normalized_filtered <- tt_dds_WT_normalized_filtered[,2:length(tt_dds_WT_normalized_filtered)]
+
+
+ggplot(tt_dds_WT_normalized_filtered, aes(x= C1_Mean, y= C2_Mean, col = significant)) +
+  geom_point(size=1, alpha = 0.6) +
+  scale_y_log10() +
+  scale_x_log10() +
+  labs( title = "Scatter plot of STAR tt-seq WT-Colonies",
+        color = 'Category',
+        x = expression("Log"[10]*"(meanExpression) in C1"), 
+        y = expression("Log"[10]*"(meanExpression) in C2")) + 
+  geom_density2d(col="red") +
+  scale_color_manual(values = c("black", "blue"),
+                     labels = c("Not Significant", "Significant"))+
+  #geom_errorbar(data = TTseqC1RemovedNormalizedFiltered.G[1:50,] ,aes(ymin = LOW_Mean - LOW_std, ymax = LOW_Mean + LOW_std), width = 0.1, alpha = 0.2) +
+  #geom_errorbarh(aes(xmin = WT_Mean - WT_std, xmax = WT_Mean + WT_std), height = 0.1, alpha = 0.2) +
+  theme_classic()
+```
+
+##### Correlation Matrix SSample
+
+```{r}
+annotation <- data.frame(Genotype = ttseq_description_WT$Colonies)
+rownames(annotation) <- rownames(ttseq_description_WT)
+
+spearman_correlation_matrix <- cor(tt_dds_WT_normalized[,grepl("^RNA", colnames(tt_dds_WT_normalized))], method = "spearman")
+dist_from_spearman <- as.dist(1-spearman_correlation_matrix)
+dist_matrix <- as.matrix(dist_from_spearman)
+
+pheatmap(dist_matrix, 
+         clustering_distance_rows = dist_from_spearman,
+         clustering_distance_cols = dist_from_spearman,
+         annotation_row = annotation,
+         annotation_col = annotation,
+         col = plasma(256))
+
+```
+
+```{r}
+tt_dds_WT_normalized$gene_name <- rownames(tt_dds_WT_normalized)
+tt_dds_WT_normalized_long <- 
+  melt(tt_dds_WT_normalized[,grepl("^RNA", colnames(tt_dds_WT_normalized)) | colnames(tt_dds_WT_normalized) == "gene_name"],
+  id.vars = "gene_name",
+  variable_name = "sample_name")
+colnames(tt_dds_WT_normalized_long)[2] <- "sample_name"
+colnames(tt_dds_WT_normalized_long)[3] <- "normalized_count"
+tt_dds_WT_normalized_long <- merge(tt_dds_WT_normalized_long, ttseq_description_WT, by="sample_name")
+head(tt_dds_WT_normalized_long)
+```
+
+##### Top 10 Up Degs Bar Plot
+
+```{r}
+tt_WT_UpReg10 <- rownames(tt_WT_UpRegSortedTop[1:10,])
+for (gene in tt_WT_UpReg10) {
+  p <- ggplot(tt_dds_WT_normalized_long[tt_dds_WT_normalized_long$gene_name == gene, ],
+              aes(x = Colonies, y = normalized_count)) +
+    geom_boxplot(width = 0.1, alpha = 0.5, aes(fill = Colonies)) +
+    geom_jitter(aes(colour = Replicate), width = 0.2, size = 1.5) +
+    labs(title = paste("Expression of", 
+                       MusGeneNames$gene_name[MusGeneNames$gene_id == gene]),
+         y = expression("Normalized Counts"),
+         x = "Colonies") +
+    theme_classic()
+  print(p)
+}
+
+```
+
+##### Top 10 Down Degs Bar Plot
+
+```{r}
+tt_WT_DownReg10 <- rownames(tt_WT_DownRegSortedTop[1:10,])
+for (gene in tt_WT_DownReg10) {
+  p <- ggplot(tt_dds_WT_normalized_long[tt_dds_WT_normalized_long$gene_name == gene, ],
+              aes(x = Colonies, y = normalized_count)) +
+    geom_boxplot(width = 0.1, alpha = 0.5, aes(fill = Colonies)) +
+    geom_jitter(aes(colour = Replicate), width = 0.2, size = 1.5) +
+    labs(title = paste("Expression of", 
+                       MusGeneNames$gene_name[MusGeneNames$gene_id == gene]),
+         y = expression("Normalized Counts"),
+         x = "Colonies") +
+    theme_classic()
+  print(p)
+}
+```
+
+## LOW
+
+```{r}
+tt_dds_LOW <- DESeqDataSetFromMatrix(countData = bowtie_ttseq_LOW,
+                              colData = ttseq_description_LOW,
+                              design = ~ Colonies)
+tt_dds_LOW <- estimateSizeFactors(tt_dds_LOW, controlGenes = grepl("Droso_", rownames(bowtie_ttseq_LOW)))
+tt_dds_LOW <- DESeq(tt_dds_LOW[grepl("^ENS", rownames(bowtie_ttseq_LOW))])
+tt_res_LOW <- results(tt_dds_LOW, name="Colonies_C2_vs_C1", contrast=c("Colonies","C1","C2"))
+tt_resNoNa_LOW <- tt_res_LOW[!is.na(tt_res_LOW$padj) & !is.na(tt_res_LOW$log2FoldChange), ]
+```
+
+##### MA Plot
+
+```{r}
+plotMA(tt_resNoNa_LOW)
+
+foldchange_threeshold <- 0.6
+padj_threeshold <- 0.05
+
+tt_resNoNa_LOW$significant <- "Not Significant"
+tt_resNoNa_LOW$significant[tt_resNoNa_LOW$padj < padj_threeshold] <- "Significant"
+
+ggplot(tt_resNoNa_LOW, aes(x = baseMean, 
+                       y =log2FoldChange, 
+                       col = significant)) +
+  geom_point(size = 1) +
+  coord_cartesian(ylim = c(-17, 17)) +
+  labs( title = "MA Plot from Bowtie tt-seq LOW-Colonies",
+        color = 'Category',
+        x = expression("BaseMean Of Normalized Counts"), 
+        y = expression("Log"[2]*" Fold Change")) + 
+  scale_x_log10() +
+  geom_hline(yintercept = 0, col = "black", linetype = 'dashed', linewidth = 1) +
+  theme_classic() +
+  scale_color_manual(values = c("darkgrey", "blue"),
+                     labels = c("Not Significant", "Significant"))
+
+ggplot((tt_resNoNa_LOW[tt_resNoNa_LOW$index %in% x_genes$gene_id,]), aes(x = baseMean, y = log2FoldChange, col = significant)) +
+  geom_point(size = 1) +
+  coord_cartesian(ylim = c(-17, 17)) +
+  labs( title = "MA Plot from Bowtie tt-seq LOW-Colonies (chrX only)",
+        color = 'Category',
+        x = expression("BaseMean Of Normalized Counts"), 
+        y = expression("Log"[2]*" Fold Change")) + 
+  scale_x_log10() +
+  geom_hline(yintercept = 0, col = "black", linetype = 'dashed', linewidth = 1) +
+  theme_classic() +
+  scale_color_manual(values = c("darkgrey", "blue"),
+                     labels = c("Not Significant", "Significant"))
+
+ggplot((tt_resNoNa_LOW[tt_resNoNa_LOW$index %in% y_genes$gene_id,]), aes(x = baseMean, y = log2FoldChange, col = significant)) +
+  geom_point(size = 1) +
+  coord_cartesian(ylim = c(-17, 17)) +
+  labs( title = "MA Plot from Bowtie tt-seq LOW-Colonies (chrY only)",
+        color = 'Category',
+        x = expression("BaseMean Of Normalized Counts"), 
+        y = expression("Log"[2]*" Fold Change")) + 
+  scale_x_log10() +
+  geom_hline(yintercept = 0, col = "black", linetype = 'dashed', linewidth = 1) +
+  theme_classic() +
+  scale_color_manual(values = c("darkgrey", "blue"),
+                     labels = c("Not Significant", "Significant"))
+
+ggplot((tt_resNoNa_LOW[tt_resNoNa_LOW$index %in% autosomal_genes$gene_id,]), aes(x = baseMean, y = log2FoldChange, col = significant)) +
+  geom_point(size = 1) +
+  coord_cartesian(ylim = c(-17, 17)) +
+  labs( title = "MA Plot from Bowtie tt-seq LOW-Colonies (autosomal chr only)",
+        color = 'Category',
+        x = expression("BaseMean Of Normalized Counts"), 
+        y = expression("Log"[2]*" Fold Change")) + 
+  scale_x_log10() +
+  geom_hline(yintercept = 0, col = "black", linetype = 'dashed', linewidth = 1) +
+  theme_classic() +
+  scale_color_manual(values = c("darkgrey", "blue"),
+                     labels = c("Not Significant", "Significant"))
+```
+
+##### QQ Plot
+
+```{r}
+tt_resNoNa_LOW$PvalueSorted <- -log10(sort(tt_resNoNa_LOW$pvalue))
+tt_resNoNa_LOW$PvalueExpected <- -log10(ppoints(length(tt_resNoNa_LOW$PvalueSorted)))
+
+
+ggplot(tt_resNoNa_LOW, aes(PvalueSorted, PvalueExpected)) +
+  geom_point(size = 1) +
+    geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "gray") +
+  labs(title = "QQ Plot of Bowtie tt-seq WT-Colonies",
+       x = expression("Observed -Log"[10]*" pvalue"), 
+       y = expression("Expected -Log"[10]*" pvalue")) + 
+  scale_x_log10() +
+  scale_y_log10() +
+  theme_classic()
+
+```
+
+##### Volcano Plot
+
+```{r}
+tt_LOW_VocPlot <- tt_resNoNa_LOW[order(tt_resNoNa_LOW$padj),]
+tt_LOW_VocPlot$diffexpressed <- "NO"
+tt_LOW_VocPlot$diffexpressed[tt_LOW_VocPlot$log2FoldChange > foldchange_threeshold & tt_LOW_VocPlot$padj < padj_threeshold] <- "UP"
+tt_LOW_VocPlot$diffexpressed[tt_LOW_VocPlot$log2FoldChange < -foldchange_threeshold & tt_LOW_VocPlot$padj < padj_threeshold] <- "DOWN"
+
+ggplot(data = tt_LOW_VocPlot, 
+       aes(x = log2FoldChange, y = -log10(padj), col = diffexpressed)) +
+  geom_vline(xintercept = c(-foldchange_threeshold, foldchange_threeshold), col = "gray", linetype = 'dashed') +
+  geom_hline(yintercept = -log10(padj_threeshold), col = "gray", linetype = 'dashed') +
+  labs(title="Volcano Plot Of Bowtie tt-seq LOW-Colonies",
+       color = 'Category',  
+       x = expression("log"[2]*"(FC)"), 
+       y = expression("-log"[10]*"(padj)")) + 
+  scale_x_continuous(breaks = seq(-14, 14, 2)) +
+  geom_point(size = 1) +
+  scale_color_manual(values = c("#00AFBB", "grey", "#FFDB6D"),
+                     labels = c("Downregulated", "Not significant", "Upregulated"))+
+  theme_classic()
+```
+
+##### Bar Plot Top 20 Degs
+
+```{r}
+tt_LOW_UpReg <- tt_LOW_VocPlot[tt_LOW_VocPlot$diffexpressed=="UP",][,1:6]
+tt_LOW_DownReg <- tt_LOW_VocPlot[tt_LOW_VocPlot$diffexpressed=="DOWN",][,1:6]
+
+tt_LOW_UpReg$neg_log10_padj <- -log10(tt_LOW_UpReg$padj)
+tt_LOW_DownReg$neg_log10_padj <- -log10(tt_LOW_DownReg$padj)
+tt_LOW_UpRegSorted <- tt_LOW_UpReg[order(-tt_LOW_UpReg$log2FoldChange, -tt_LOW_UpReg$neg_log10_padj),]
+tt_LOW_DownRegSorted <- tt_LOW_DownReg[order(tt_LOW_DownReg$log2FoldChange, -tt_LOW_DownReg$neg_log10_padj),]
+tt_LOW_UpRegSortedTop <- head(tt_LOW_UpRegSorted, 50)
+tt_LOW_DownRegSortedTop <- head(tt_LOW_DownRegSorted, 50)
+
+tt_LOW_UpRegSortedTop$gene <- MusGeneNames$gene_name[match(rownames(tt_LOW_UpRegSortedTop), MusGeneNames$gene_id)]
+tt_LOW_UpRegSortedTop$gene <- factor(tt_LOW_UpRegSortedTop$gene, levels = rev(tt_LOW_UpRegSortedTop$gene))
+tt_LOW_DownRegSortedTop$gene <- MusGeneNames$gene_name[match(rownames(tt_LOW_DownRegSortedTop), MusGeneNames$gene_id)]
+tt_LOW_DownRegSortedTop$gene <- factor(tt_LOW_DownRegSortedTop$gene, levels = rev(tt_LOW_DownRegSortedTop$gene))
+
+
+ggplot(tt_LOW_UpRegSortedTop, aes(x = gene, y = log2FoldChange)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  coord_flip() +
+  labs(title = "Most Upregulated Genes [Bowtie tt-seq WT-Colonies]", x = "Gene", y = "log2 Fold Change") +
+  theme_minimal()
+
+ggplot(tt_LOW_DownRegSortedTop, aes(x = gene, y = log2FoldChange)) +
+  geom_bar(stat = "identity", fill = "firebrick") +  
+  coord_flip() +
+  labs(title = "Most Downregulated Genes [Bowtie tt-seq WT-Colonies]", x = "Gene", y = "log2 Fold Change") +
+  theme_minimal()
+```
+
+#####Scatter Plot Mean Expression
+
+```{r}
+tt_dds_LOW_normalized <- data.frame(counts(tt_dds_LOW, normalize=TRUE))
+tt_dds_LOW_normalized$C1_Mean <- unlist(apply(tt_dds_LOW_normalized[,rownames(ttseq_description_LOW[ttseq_description_LOW$Colonies=="C1",])], 1, mean))
+tt_dds_LOW_normalized$C2_Mean <- unlist(apply(tt_dds_LOW_normalized[,rownames(ttseq_description_LOW[ttseq_description_LOW$Colonies=="C2",])], 1, mean))
+tt_dds_LOW_normalized$C1_std <- unlist(apply(tt_dds_LOW_normalized[,rownames(ttseq_description_LOW[ttseq_description_LOW$Colonies=="C1",])], 1, sd))
+tt_dds_LOW_normalized$C2_std <- unlist(apply(tt_dds_LOW_normalized[,rownames(ttseq_description_LOW[ttseq_description_LOW$Colonies=="C2",])], 1, sd))
+
+tt_dds_LOW_normalized_filtered <- tt_dds_LOW_normalized %>% filter(C1_Mean > 0,
+                                                        (C1_Mean - C1_std > 0),
+                                                        C2_Mean > 0,
+                                                        (C2_Mean - C2_std > 0))
+tt_resNoNa_LOW$index <- rownames(tt_resNoNa_LOW)
+tt_dds_LOW_normalized_filtered$index <- rownames(tt_dds_LOW_normalized_filtered)
+tt_dds_LOW_normalized_filtered <- merge(tt_dds_LOW_normalized_filtered, data.frame(tt_resNoNa_LOW[,c(7,10)]), by="index")
+rownames(tt_dds_LOW_normalized_filtered) <- tt_dds_LOW_normalized_filtered$index
+tt_dds_LOW_normalized_filtered <- tt_dds_LOW_normalized_filtered[,2:length(tt_dds_LOW_normalized_filtered)]
+
+
+ggplot(tt_dds_LOW_normalized_filtered, aes(x= C1_Mean, y= C2_Mean, col = significant)) +
+  geom_point(size=1, alpha = 0.6) +
+  scale_y_log10() +
+  scale_x_log10() +
+  labs( title = "Scatter plot of Bowtie tt-seq WT-Colonies",
+        color = 'Category',
+        x = expression("Log"[10]*"(meanExpression) in C1"), 
+        y = expression("Log"[10]*"(meanExpression) in C2")) + 
+  geom_density2d(col="red") +
+  scale_color_manual(values = c("black", "blue"),
+                     labels = c("Not Significant", "Significant"))+
+  #geom_errorbar(data = TTseqC1RemovedNormalizedFiltered.G[1:50,] ,aes(ymin = LOW_Mean - LOW_std, ymax = LOW_Mean + LOW_std), width = 0.1, alpha = 0.2) +
+  #geom_errorbarh(aes(xmin = WT_Mean - WT_std, xmax = WT_Mean + WT_std), height = 0.1, alpha = 0.2) +
+  theme_classic()
+```
+
+##### Correlation Matrix SSample
+
+```{r}
+annotation <- data.frame(Genotype = ttseq_description_LOW$Colonies)
+rownames(annotation) <- rownames(ttseq_description_LOW)
+
+spearman_correlation_matrix <- cor(tt_dds_LOW_normalized[,grepl("^RNA", colnames(tt_dds_LOW_normalized))], method = "spearman")
+dist_from_spearman <- as.dist(1-spearman_correlation_matrix)
+dist_matrix <- as.matrix(dist_from_spearman)
+
+pheatmap(dist_matrix, 
+         clustering_distance_rows = dist_from_spearman,
+         clustering_distance_cols = dist_from_spearman,
+         annotation_row = annotation,
+         annotation_col = annotation,
+         col = plasma(256))
+
+```
+
+```{r}
+tt_dds_LOW_normalized$gene_name <- rownames(tt_dds_LOW_normalized)
+tt_dds_LOW_normalized_long <- 
+  melt(tt_dds_LOW_normalized[,grepl("^RNA", colnames(tt_dds_LOW_normalized)) | colnames(tt_dds_LOW_normalized) == "gene_name"],
+  id.vars = "gene_name",
+  variable_name = "sample_name")
+colnames(tt_dds_LOW_normalized_long)[2] <- "sample_name"
+colnames(tt_dds_LOW_normalized_long)[3] <- "normalized_count"
+tt_dds_LOW_normalized_long <- merge(tt_dds_LOW_normalized_long, ttseq_description_LOW, by="sample_name")
+head(tt_dds_LOW_normalized_long)
+```
+
+##### Top 10 Up Degs Bar Plot
+
+```{r}
+tt_LOW_UpReg10 <- rownames(tt_LOW_UpRegSortedTop[1:10,])
+for (gene in tt_LOW_UpReg10) {
+  p <- ggplot(tt_dds_LOW_normalized_long[tt_dds_LOW_normalized_long$gene_name == gene, ],
+              aes(x = Colonies, y = normalized_count)) +
+    geom_boxplot(width = 0.1, alpha = 0.5, aes(fill = Colonies)) +
+    geom_jitter(aes(colour = Replicate), width = 0.2, size = 1.5) +
+    labs(title = paste("Expression of", 
+                       MusGeneNames$gene_name[MusGeneNames$gene_id == gene]),
+         y = expression("Normalized Counts"),
+         x = "Colonies") +
+    theme_classic()
+  print(p)
+}
+
+```
+
+##### Top 10 Down Degs Bar Plot
+
+```{r}
+tt_LOW_DownReg10 <- rownames(tt_LOW_DownRegSortedTop[1:10,])
+for (gene in tt_LOW_DownReg10) {
+  p <- ggplot(tt_dds_LOW_normalized_long[tt_dds_LOW_normalized_long$gene_name == gene, ],
+              aes(x = Colonies, y = normalized_count)) +
+    geom_boxplot(width = 0.1, alpha = 0.5, aes(fill = Colonies)) +
+    geom_jitter(aes(colour = Replicate), width = 0.2, size = 1.5) +
+    labs(title = paste("Expression of", 
+                       MusGeneNames$gene_name[MusGeneNames$gene_id == gene]),
+         y = expression("Normalized Counts"),
+         x = "Colonies") +
+    theme_classic()
+  print(p)
+}
+```
+
+```{r}
+writeLines(MusGeneNames$gene_name[match(rownames(rna_WT_UpRegSorted), MusGeneNames$gene_id)], "/home/franck/SCRATCH/fpan/Script/Analysis_image/GENE_LIST/RNA_STAR_WT_C1vsC2_UPREG.txt")
+writeLines(MusGeneNames$gene_name[match(rownames(rna_WT_DownRegSorted), MusGeneNames$gene_id)], "/home/franck/SCRATCH/fpan/Script/Analysis_image/GENE_LIST/RNA_STAR_WT_C1vsC2_DOWNREG.txt")
+
+writeLines(MusGeneNames$gene_name[match(rownames(rna_LOW_UpRegSorted), MusGeneNames$gene_id)], "/home/franck/SCRATCH/fpan/Script/Analysis_image/GENE_LIST/RNA_STAR_LOW_C1vsC2_UPREG.txt")
+writeLines(MusGeneNames$gene_name[match(rownames(rna_LOW_DownRegSorted), MusGeneNames$gene_id)], "/home/franck/SCRATCH/fpan/Script/Analysis_image/GENE_LIST/RNA_STAR_LOW_C1vsC2_DOWNREG.txt")
+
+writeLines(MusGeneNames$gene_name[match(rownames(tt_WT_UpRegSorted), MusGeneNames$gene_id)], "/home/franck/SCRATCH/fpan/Script/Analysis_image/GENE_LIST/TT_BOWTIE_WT_C1vsC2_UPREG.txt")
+writeLines(MusGeneNames$gene_name[match(rownames(tt_WT_DownRegSorted), MusGeneNames$gene_id)], "/home/franck/SCRATCH/fpan/Script/Analysis_image/GENE_LIST/TT_BOWTIE_WT_C1vsC2_DOWNREG.txt")
+
+writeLines(MusGeneNames$gene_name[match(rownames(tt_LOW_UpRegSorted), MusGeneNames$gene_id)], "/home/franck/SCRATCH/fpan/Script/Analysis_image/GENE_LIST/TT_BOWTIE_LOW_C1vsC2_UPREG.txt")
+writeLines(MusGeneNames$gene_name[match(rownames(tt_LOW_DownRegSorted), MusGeneNames$gene_id)], "/home/franck/SCRATCH/fpan/Script/Analysis_image/GENE_LIST/TT_BOWTIE_LOW_C1vsC2_DOWNREG.txt")
+
+```

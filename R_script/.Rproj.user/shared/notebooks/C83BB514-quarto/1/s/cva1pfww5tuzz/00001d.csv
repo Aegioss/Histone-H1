@@ -1,0 +1,1 @@
+"0","kpTr <- kpPlotDensity(kpTr, window.size = 0.5e6, data= TT_genesC1, data.panel=1, col = ""forestgreen"", border=""forestgreen"")"

@@ -1,0 +1,4 @@
+"0","gtf_genes <- gtf_file[gtf_file$type == ""gene"", ]"
+"0","MusMusculus_Genes <- gtf_genes[grep(""^ENS"", gtf_genes$gene_id), ]"
+"0","MusGeneNames <- unique(data.frame(mcols(MusMusculus_Genes[,c(""gene_id"", ""gene_name"")])))"
+"0","head(MusGeneNames)"

@@ -1,0 +1,27 @@
+"0","ttseq_description_C1_removed <- ttseq_description[!(ttseq_description$Genotype==""WT"" & ttseq_description$Colonies==""C1""),]"
+"0","bowtie_ttseq_C1_removed <- bowtie_ttseq[,rownames(ttseq_description_C1_removed)]"
+"0",""
+"0","ttseq_dds_c1_removed.G <- DESeqDataSetFromMatrix(countData = bowtie_ttseq_C1_removed,"
+"0","                                    colData = ttseq_description_C1_removed,"
+"0","                                    design = ~ Genotype)"
+"2","G3;factor levels were dropped which had no samples
+g"
+"0","ttseq_dds_c1_removed.G <- estimateSizeFactors(ttseq_dds_c1_removed.G, controlGenes = grepl(""Droso_"", rownames(bowtie_ttseq_C1_removed)))"
+"0","ttseq_dds_c1_removed.G <- DESeq(ttseq_dds_c1_removed.G[grepl(""^ENS"", rownames(bowtie_ttseq_C1_removed))])"
+"2","G3;using pre-existing size factors
+g"
+"2","G3;estimating dispersions
+g"
+"2","G3;gene-wise dispersion estimates
+g"
+"2","G3;mean-dispersion relationship
+g"
+"2","G3;final dispersion estimates
+g"
+"2","G3;fitting model and testing
+g"
+"0","TtResC1Removed.G <- results(ttseq_dds_c1_removed.G, name=""Genotype_WT_vs_LOW"", contrast=c(""Genotype"",""LOW"",""WT""))"
+"0","TtResNoNaC1Removed.G <- TtResC1Removed.G[!is.na(TtResC1Removed.G$padj) & !is.na(TtResC1Removed.G$log2FoldChange), ]"
+"0","TtResNoNaC1Removed.G$significant <- ""Not Significant"""
+"0","TtResNoNaC1Removed.G$significant[TtResNoNaC1Removed.G$padj < padj_threeshold] <- ""Significant"""
+"0",""

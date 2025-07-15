@@ -1,0 +1,7 @@
+"0",""
+"0","ggplot(top_downregTxi, aes(x = transcript_id, y = log2FoldChange)) +"
+"0","  geom_bar(stat = ""identity"", fill = ""firebrick"") +   # reddish color for downregulated"
+"0","  coord_flip() +"
+"0","  scale_x_discrete(labels = top_downregTxi$gene_name) +"
+"0","  labs(title = ""Most Downregulated Genes [Salmon RNAseq]"", x = ""Gene"", y = ""log2 Fold Change"") +"
+"0","  theme_minimal()"

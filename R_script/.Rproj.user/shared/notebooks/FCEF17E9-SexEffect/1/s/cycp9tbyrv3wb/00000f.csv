@@ -1,0 +1,5 @@
+"0","input_long <- input_chromosome_reads %>%"
+"0","  rownames_to_column(""Chromosome"") %>%"
+"0","  pivot_longer(cols = -Chromosome, names_to = ""Sample"", values_to = ""ReadCount"")"
+"0","input_long$Condition <- ifelse(grepl(""LOW"", input_long$Sample), ""LOW"", ""WT"")"
+"0","input_long$ReadCount <-  as.numeric(as.character(input_long$ReadCount))"

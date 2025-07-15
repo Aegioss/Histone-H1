@@ -1,0 +1,2303 @@
+---
+title: "DESeq_Analysis"
+format: 
+  html:
+    toc: true
+editor: visual
+---
+
+## Import Data
+
+```{r}
+library(limma)
+library(tximport)
+library(readr)
+library(tximportData)
+library(DESeq2)
+library(ggplot2)
+library(GenomicRanges)
+library(dplyr)
+library(txdbmaker)
+library(viridis)
+library(patchwork)
+library(tidyverse)
+library(RColorBrewer)
+library(rtracklayer)
+library(reshape2)
+library(ggrepel)
+library(pheatmap)
+library(karyoploteR)
+```
+
+```{r}
+bowtie_matrix <- read.csv("/home/franck/SCRATCH/fpan/Genome_Index/chR_index_files/BowtieQ30_counts_matrix.csv", header = TRUE, sep = ",")
+star_matrix <- read.csv("/home/franck/SCRATCH/fpan/Genome_Index/chR_index_files/STARQ30_counts_matrix.csv", header = TRUE, sep = ",")
+description_file <- read.csv("/home/franck/SCRATCH/fpan/Genome_Index/chR_index_files/Ashish.SampleDescription.csv", header = TRUE, sep = ",")
+gtf_file <- import("/home/franck/SCRATCH/fpan/Genome_Index/chR_index_files/chR_TrExAdded.gtf")
+latest_gtf <- import("/home/franck/SCRATCH/fpan/Genome_Index/chR_index_files/rsem_9_06_25_filtered.gtf")
+```
+
+```{r}
+description_file$Genotype <- factor(description_file$Genotype, levels = c("WT", "LOW", "GapRWT"))
+colnames(bowtie_matrix)[grepl("^RNA", colnames(bowtie_matrix))] <- 
+  gsub("B.*$", "", colnames(bowtie_matrix)[grepl("^RNA", colnames(bowtie_matrix))])
+colnames(star_matrix)[grepl("^RNA", colnames(star_matrix))] <- 
+  gsub("Star.*$", "", colnames(star_matrix)[grepl("^RNA", colnames(star_matrix))])
+rownames(description_file) <- colnames(star_matrix)[grepl("^RNA", colnames(star_matrix))]
+description_file$sample_name <- rownames(description_file)
+rownames(star_matrix) <- star_matrix$X
+rownames(bowtie_matrix) <- bowtie_matrix$X
+star_matrix <- star_matrix[, -1]
+bowtie_matrix <- bowtie_matrix[, -1]
+```
+
+```{r}
+head(star_matrix)
+head(bowtie_matrix)
+head(description_file)
+```
+
+```{r}
+rnaseq_description <- description_file[1:12,]
+ttseq_description <- description_file[13:24,]
+
+star_rnaseq <- star_matrix[, rownames(rnaseq_description)]
+
+star_ttseq <- star_matrix[, rownames(ttseq_description)]
+bowtie_ttseq <- bowtie_matrix[, rownames(ttseq_description)]
+
+
+head(star_ttseq)
+head(bowtie_ttseq)
+ttseq_description
+```
+
+```{r}
+gtf_genes <- gtf_file[gtf_file$type == "gene", ]
+MusMusculus_Genes <- gtf_genes[grep("^ENS", gtf_genes$gene_id), ]
+MusGeneNames <- unique(data.frame(mcols(MusMusculus_Genes[,c("gene_id", "gene_name")])))
+head(MusGeneNames)
+```
+
+```{r}
+base_dir <- "/home/franck/SCRATCH/fpan/Genome_Index/chR_index_files/SalmonRNA/QuantOutput_gcBias"
+files <- file.path(base_dir, paste0(rnaseq_description$sample_name, "_quant"), "quant.sf")
+names(files) <- rnaseq_description$sample_name
+tx2gene <- read_csv(file.path(base_dir, "tx2gene.rsem.filtered.csv"), show_col_types = FALSE)
+txi_tx <- tximport(files, type="salmon", txOut=TRUE)
+head(tx2gene)
+```
+
+```{r}
+TTbase_dir <- "/home/franck/SCRATCH/fpan/Genome_Index/chR_index_files/SalmonTT/QuantOutput"
+TTfiles <- file.path(TTbase_dir, paste0(ttseq_description$sample_name, "_quant"), "quant.sf")
+names(TTfiles) <- ttseq_description$sample_name
+TTtx2gene <- read_csv(file.path(base_dir, "tx2gene.rsem.filtered.csv"), show_col_types = FALSE)
+TTtxi_tx <- tximport(TTfiles, type="salmon", txOut=TRUE)
+head(TTtx2gene)
+```
+
+```{r}
+gtf_mono_exon <- latest_gtf
+exons_gtf <- gtf_mono_exon[gtf_mono_exon$type == "exon"]
+df_subset <- as.data.frame(exons_gtf)
+
+exon_counts <- df_subset %>%
+  group_by(transcript_id) %>%
+  summarise(exon_count = n()) %>%
+  filter(exon_count == 1)
+mono_exon_id <- exon_counts$transcript_id
+mono_exon_id <- mono_exon_id[grepl("^ENS", mono_exon_id)]
+```
+
+## DESeq Initialization & Visualization
+
+### STAR-RNAseq-dds
+
+```{r}
+rnaseq_dds <- DESeqDataSetFromMatrix(countData = star_rnaseq,
+                              colData = rnaseq_description,
+                              design = ~ Colonies + Genotype )
+rnaseq_dds <- estimateSizeFactors(rnaseq_dds, controlGenes = grepl("Droso_", rownames(star_rnaseq)))
+rnaseq_dds <- DESeq(rnaseq_dds[grepl("^ENS", rownames(star_rnaseq))])
+resultsNames(rnaseq_dds)
+```
+
+### Salmon-RNAseq-dds-Mus-Genes
+
+```{r}
+ddsTxi <- DESeqDataSetFromTximport(txi_tx,
+                                   colData = rnaseq_description,
+                                   design = ~ Colonies + Genotype)
+ddsTxi <- estimateSizeFactors(ddsTxi, controlGenes = grepl("^FBtr|^PreMrnaDroso", rownames(ddsTxi)))
+ddsTxi <- DESeq(ddsTxi[grepl("^ENS|^PreMrnaENS", rownames(ddsTxi))])
+resultsNames(ddsTxi)
+```
+
+### Salmon-RNAseq-dds-Mus-PremRNA
+
+```{r}
+ddsTxiTT <- DESeqDataSetFromTximport(txi_tx,
+                                   colData = rnaseq_description,
+                                   design = ~ Colonies + Genotype)
+ddsTxiTT <- estimateSizeFactors(ddsTxiTT, controlGenes = grepl("^FBtr|^PreMrnaDroso", rownames(ddsTxiTT)))
+premrna_id <- rownames(ddsTxiTT[grepl("^PreMrnaENS", rownames(ddsTxiTT))])
+premrna_id <- c(premrna_id, mono_exon_id)
+ddsTxiTT <- DESeq(ddsTxiTT[rownames(ddsTxiTT) %in% premrna_id,])
+
+resultsNames(ddsTxiTT)
+```
+
+### STAR-TTseq-dds
+
+```{r}
+ttseq_dds <- DESeqDataSetFromMatrix(countData = star_ttseq,
+                                    colData = ttseq_description,
+                                    design = ~ Colonies + Genotype)
+ttseq_dds <- estimateSizeFactors(ttseq_dds, controlGenes = grepl("^Droso", rownames(star_ttseq)))
+ttseq_dds <- DESeq(ttseq_dds[grepl("^ENS", rownames(star_ttseq))])
+resultsNames(ttseq_dds)
+```
+
+### Bowtie2-TTseq-dds
+
+```{r}
+ttseq_dds_Bowtie <- DESeqDataSetFromMatrix(countData = bowtie_ttseq,
+                                    colData = ttseq_description,
+                                    design = ~ Colonies + Genotype)
+ttseq_dds_Bowtie <- estimateSizeFactors(ttseq_dds_Bowtie, controlGenes = grepl("Droso_", rownames(bowtie_ttseq)))
+ttseq_dds_Bowtie <- DESeq(ttseq_dds_Bowtie[grepl("^ENS", rownames(bowtie_ttseq))])
+resultsNames(ttseq_dds_Bowtie)
+```
+
+### Results Instances LOW vs WT
+
+```{r}
+RnaRes <- results(rnaseq_dds, name="Genotype_WT_vs_LOW", contrast=c("Genotype","LOW","WT"))
+TtRes <- results(ttseq_dds, name="Genotype_WT_vs_LOW", contrast=c("Genotype","LOW","WT"))
+TtResBowtie <- results(ttseq_dds_Bowtie, name="Genotype_WT_vs_LOW", contrast=c("Genotype","LOW","WT"))
+TxiRes <- results(ddsTxi, name="Genotype_WT_vs_LOW", contrast=c("Genotype","LOW","WT"))
+TxiResTT <- results(ddsTxiTT, name="Genotype_WT_vs_LOW", contrast=c("Genotype","LOW","WT"))
+
+TxiTTResNoNa <- TxiResTT[!is.na(TxiResTT$padj) & !is.na(TxiResTT$log2FoldChange), ]
+TxiResNoNa <- TxiRes[!is.na(TxiRes$padj) & !is.na(TxiRes$log2FoldChange), ]
+RnaResNoNa <- RnaRes[!is.na(RnaRes$padj) & !is.na(RnaRes$log2FoldChange), ]
+TTResNoNa <- TtRes[!is.na(TtRes$padj) & !is.na(TtRes$log2FoldChange), ]
+TTResBowtieNoNa <- TtResBowtie[!is.na(TtResBowtie$padj) & 
+                              !is.na(TtResBowtie$log2FoldChange), ]
+```
+
+### MA plots
+
+```{r}
+plotMA(RnaRes)
+plotMA(TxiResNoNa)
+plotMA(TxiTTResNoNa)
+plotMA(TtRes)
+plotMA(TtResBowtie)
+```
+
+### Manual MA plots
+
+```{r}
+foldchange_threeshold <- 0.6
+padj_threeshold <- 0.05
+
+RnaResNoNa$significant <- "Not Significant"
+RnaResNoNa$significant[RnaResNoNa$padj < padj_threeshold] <- "Significant"
+
+TTResNoNa$significant <- "Not Significant"
+TTResNoNa$significant[TTResNoNa$padj < padj_threeshold] <- "Significant"
+
+TTResBowtieNoNa$significant <- "Not Significant"
+TTResBowtieNoNa$significant[TTResBowtieNoNa$padj < padj_threeshold] <- "Significant"
+
+TxiResNoNa$significant <- "Not Significant"
+TxiResNoNa$significant[TxiResNoNa$padj < padj_threeshold] <- "Significant"
+
+TxiTTResNoNa$significant <- "Not Significant"
+TxiTTResNoNa$significant[TxiTTResNoNa$padj < padj_threeshold] <- "Significant"
+
+ggplot(RnaResNoNa, aes(x =RnaResNoNa$baseMean, 
+                       y = RnaResNoNa$log2FoldChange, 
+                       col = significant)) +
+  geom_point(size = 1) +
+  #coord_cartesian(ylim = c(-5, 5)) +
+  labs( title = "MA Plot from RNA-seq",
+        color = 'Category',
+        x = expression("BaseMean Of Normalized Counts"), 
+        y = expression("Log"[2]*" Fold Change")) + 
+  scale_x_log10() +
+  geom_hline(yintercept = 0, col = "black", linetype = 'dashed', linewidth = 1) +
+  theme_classic() +
+  scale_color_manual(values = c("darkgrey", "blue"),
+                     labels = c("Not Significant", "Significant"))+
+  geom_density2d(col="red")
+
+ggplot(TxiResNoNa, aes(x =TxiResNoNa$baseMean, 
+                       y = TxiResNoNa$log2FoldChange, 
+                       col = significant)) +
+  geom_point(size = 1) +
+  #coord_cartesian(ylim = c(-5, 5)) +
+  labs( title = "MA Plot from Salmon RNA-seq",
+        color = 'Category',
+        x = expression("BaseMean Of Normalized Counts"), 
+        y = expression("Log"[2]*" Fold Change")) + 
+  scale_x_log10() +
+  geom_hline(yintercept = 0, col = "black", linetype = 'dashed', linewidth = 1) +
+  theme_classic() +
+  scale_color_manual(values = c("darkgrey", "blue"),
+                     labels = c("Not Significant", "Significant"))+
+  geom_density2d(col="red")
+
+ggplot(TxiTTResNoNa, aes(x =TxiTTResNoNa$baseMean, 
+                       y = TxiTTResNoNa$log2FoldChange, 
+                       col = significant)) +
+  geom_point(size = 1) +
+  #coord_cartesian(ylim = c(-5, 5)) +
+  labs( title = "MA Plot from Salmon RNA-seq Only PreMrna",
+        color = 'Category',
+        x = expression("BaseMean Of Normalized Counts"), 
+        y = expression("Log"[2]*" Fold Change")) + 
+  scale_x_log10() +
+  geom_hline(yintercept = 0, col = "black", linetype = 'dashed', linewidth = 1) +
+  theme_classic() +
+  scale_color_manual(values = c("darkgrey", "blue"),
+                     labels = c("Not Significant", "Significant"))+
+  geom_density2d(col="red")
+
+
+ggplot(TTResNoNa, aes(x =TTResNoNa$baseMean, 
+                       y = TTResNoNa$log2FoldChange, 
+                       col = significant)) +
+  geom_point(size = 1) +
+  #coord_cartesian(ylim = c(-5, 5)) +
+  labs( title = "MA Plot from STAR TT-seq",
+        color = 'Category',
+        x = expression("BaseMean Of Normalized Counts"), 
+        y = expression("Log"[2]*" Fold Change")) + 
+  scale_x_log10() +
+  geom_hline(yintercept = 0, col = "black", linetype = 'dashed', linewidth = 1) +
+  theme_classic() +
+  scale_color_manual(values = c("darkgrey", "blue"),
+                     labels = c("Not Significant", "Significant"))+
+  geom_density2d(col="red")
+
+ggplot(TTResBowtieNoNa, aes(x =TTResBowtieNoNa$baseMean, 
+                       y = TTResBowtieNoNa$log2FoldChange, 
+                       col = significant)) +
+  geom_point(size = 1) +
+  #geom_point(data=TTResBowtieNoNa["ENSMUSG00000069049.11",], shape=23, color="darkgreen", size=5, aes(x = baseMean, 
+                       #y = log2FoldChange, 
+                       #col = significant)) +
+  #coord_cartesian(ylim = c(-5, 5)) +
+  labs( title = "MA Plot from Bowtie2 TT-seq",
+        color = 'Category',
+        x = expression("BaseMean Of Normalized Counts"), 
+        y = expression("Log"[2]*" Fold Change")) + 
+  scale_x_log10() +
+  geom_hline(yintercept = 0, col = "black", linetype = 'dashed', linewidth = 1) +
+  theme_classic() +
+  scale_color_manual(values = c("darkgrey", "blue"),
+                     labels = c("Not Significant", "Significant"))+
+  geom_density2d(col="red")
+
+```
+
+### QQ plot
+
+```{r}
+RnaResNoNa$PvalueSorted <- -log10(sort(RnaResNoNa$pvalue))
+RnaResNoNa$PvalueExpected <- -log10(ppoints(length(RnaResNoNa$PvalueSorted)))
+
+TxiResNoNa$PvalueSorted <- -log10(sort(TxiResNoNa$pvalue))
+TxiResNoNa$PvalueExpected <- -log10(ppoints(length(TxiResNoNa$PvalueSorted)))
+
+TxiTTResNoNa$PvalueSorted <- -log10(sort(TxiTTResNoNa$pvalue))
+TxiTTResNoNa$PvalueExpected <- -log10(ppoints(length(TxiTTResNoNa$PvalueSorted)))
+
+TTResNoNa$PvalueSorted <- -log10(sort(TTResNoNa$pvalue))
+TTResNoNa$PvalueExpected <- -log10(ppoints(length(TTResNoNa$PvalueSorted)))
+
+TTResBowtieNoNa$PvalueSorted <- -log10(sort(TTResBowtieNoNa$pvalue))
+TTResBowtieNoNa$PvalueExpected <- -log10(ppoints(length(TTResBowtieNoNa$PvalueSorted)))
+
+
+
+ggplot(RnaResNoNa, aes(PvalueSorted, PvalueExpected)) +
+  geom_point(size = 1) +
+    geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "gray") +
+  labs(title = "QQ Plot of RNA-seq",
+       x = expression("Observed -Log"[10]*" pvalue"), 
+       y = expression("Expected -Log"[10]*" pvalue")) + 
+  scale_x_log10() +
+  scale_y_log10() +
+  theme_classic()
+
+ggplot(TxiResNoNa, aes(PvalueSorted, PvalueExpected)) +
+  geom_point(size = 1) +
+    geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "gray") +
+  labs(title = "QQ Plot of Salmon RNA-seq",
+       x = expression("Observed -Log"[10]*" pvalue"), 
+       y = expression("Expected -Log"[10]*" pvalue")) + 
+  scale_x_log10() +
+  scale_y_log10() +
+  theme_classic()
+
+ggplot(TxiTTResNoNa, aes(PvalueSorted, PvalueExpected)) +
+  geom_point(size = 1) +
+    geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "gray") +
+  labs(title = "QQ Plot of Salmon RNA-seq Only PreMrna",
+       x = expression("Observed -Log"[10]*" pvalue"), 
+       y = expression("Expected -Log"[10]*" pvalue")) + 
+  scale_x_log10() +
+  scale_y_log10() +
+  theme_classic()
+
+ggplot(TTResNoNa, aes(PvalueSorted, PvalueExpected)) +
+  geom_point(size = 1) +
+    geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "gray") +
+  labs(title = "QQ Plot of STAR TT-seq",
+       x = expression("Observed -Log"[10]*" pvalue"), 
+       y = expression("Expected -Log"[10]*" pvalue")) + 
+  scale_x_log10() +
+  scale_y_log10() +
+  theme_classic()
+
+ggplot(TTResBowtieNoNa, aes(PvalueSorted, PvalueExpected)) +
+  geom_point(size = 1) +
+    geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "gray") +
+  labs(title = "QQ Plot of Bowtie2 TT-seq",
+       x = expression("Observed -Log"[10]*" pvalue"), 
+       y = expression("Expected -Log"[10]*" pvalue")) + 
+  scale_x_log10() +
+  scale_y_log10() +
+  theme_classic()
+```
+
+## RNA-Seq Analysis
+
+### STAR
+
+#### Volcano Plot
+
+```{r}
+RnaResVocPlot <- RnaResNoNa[order(RnaResNoNa$padj),]
+RnaResVocPlot$diffexpressed <- "NO"
+RnaResVocPlot$diffexpressed[RnaResVocPlot$log2FoldChange > foldchange_threeshold & RnaResVocPlot$padj < padj_threeshold] <- "UP"
+RnaResVocPlot$diffexpressed[RnaResVocPlot$log2FoldChange < -foldchange_threeshold & RnaResVocPlot$padj < padj_threeshold] <- "DOWN"
+
+ggplot(data = RnaResVocPlot, 
+       aes(x = log2FoldChange, y = -log10(padj), col = diffexpressed)) +
+  geom_vline(xintercept = c(-foldchange_threeshold, foldchange_threeshold), col = "gray", linetype = 'dashed') +
+  geom_hline(yintercept = -log10(padj_threeshold), col = "gray", linetype = 'dashed') +
+  labs(title="Volcano Plot Of RNA-seq",
+       color = 'Category',  
+       x = expression("log"[2]*"(FC)"), 
+       y = expression("-log"[10]*"(padj)")) + 
+  scale_x_continuous(breaks = seq(-14, 14, 2)) +
+  geom_point(size = 1) +
+  scale_color_manual(values = c("#00AFBB", "grey", "#FFDB6D"),
+                     labels = c("Downregulated", "Not significant", "Upregulated"))+
+  theme_classic()
+```
+
+#### Degs-List-Up-Down
+
+```{r}
+
+RnaUpReg <- RnaResVocPlot[RnaResVocPlot$diffexpressed=="UP",][,1:6]
+RnaDownReg <- RnaResVocPlot[RnaResVocPlot$diffexpressed=="DOWN",][,1:6]
+
+RnaUpReg$neg_log10_padj <- -log10(RnaUpReg$padj)
+RnaDownReg$neg_log10_padj <- -log10(RnaDownReg$padj)
+RnaUpRegSorted <- RnaUpReg[order(-RnaUpReg$log2FoldChange, -RnaUpReg$neg_log10_padj),]
+RnaDownRegSorted <- RnaDownReg[order(RnaDownReg$log2FoldChange, -RnaDownReg$neg_log10_padj),]
+```
+
+#### Bar Plot Top 20 Degs
+
+```{r}
+
+top_upregRNA <- head(RnaUpRegSorted, 20)
+top_downregRNA <- head(RnaDownRegSorted, 20)
+
+top_upregRNA$gene <- MusGeneNames$gene_name[match(rownames(top_upregRNA), MusGeneNames$gene_id)]
+top_upregRNA$gene <- factor(top_upregRNA$gene, levels = rev(top_upregRNA$gene))
+top_downregRNA$gene <- MusGeneNames$gene_name[match(rownames(top_downregRNA), MusGeneNames$gene_id)]
+top_downregRNA$gene <- factor(top_downregRNA$gene, levels = rev(top_downregRNA$gene))
+
+TopUpDegsList <- rownames(top_upregRNA)
+TopDownDegsList <- rownames(top_downregRNA)
+
+ggplot(top_upregRNA, aes(x = gene, y = log2FoldChange)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  coord_flip() +
+  labs(title = "Most Upregulated Genes [RNAseq]", x = "Gene", y = "log2 Fold Change") +
+  theme_minimal()
+
+ggplot(top_downregRNA, aes(x = gene, y = log2FoldChange)) +
+  geom_bar(stat = "identity", fill = "firebrick") +   # reddish color for downregulated
+  coord_flip() +
+  labs(title = "Most Downregulated Genes [RNAseq]", x = "Gene", y = "log2 Fold Change") +
+  theme_minimal()
+```
+
+####Scatter Plot Mean Expression
+
+```{r}
+
+RnaDdsNormalized <- data.frame(counts(rnaseq_dds, normalize=TRUE))
+RnaDdsNormalized$WT_Mean <- unlist(apply(RnaDdsNormalized[,rownames(rnaseq_description[rnaseq_description$Genotype=="WT",])], 1, mean))
+RnaDdsNormalized$LOW_Mean <- unlist(apply(RnaDdsNormalized[,rownames(rnaseq_description[rnaseq_description$Genotype=="LOW",])], 1, mean))
+RnaDdsNormalized$WT_std <- unlist(apply(RnaDdsNormalized[,rownames(rnaseq_description[rnaseq_description$Genotype=="WT",])], 1, sd))
+RnaDdsNormalized$LOW_std <- unlist(apply(RnaDdsNormalized[,rownames(rnaseq_description[rnaseq_description$Genotype=="LOW",])], 1, sd))
+
+RnaDdsNormalizedFiltered <- RnaDdsNormalized %>% filter(WT_Mean > 0,
+                                                        (WT_Mean - WT_std > 0),
+                                                        LOW_Mean > 0,
+                                                        (LOW_Mean - LOW_std > 0))
+RnaResNoNa$index <- rownames(RnaResNoNa)
+RnaDdsNormalizedFiltered$index <- rownames(RnaDdsNormalizedFiltered)
+RnaDdsNormalizedFiltered <- merge(RnaDdsNormalizedFiltered, data.frame(RnaResNoNa[,c(7,10)]), by="index")
+rownames(RnaDdsNormalizedFiltered) <- RnaDdsNormalizedFiltered$index
+RnaDdsNormalizedFiltered <- RnaDdsNormalizedFiltered[,2:length(RnaDdsNormalizedFiltered)]
+
+
+ggplot(RnaDdsNormalizedFiltered, aes(x= WT_Mean, y= LOW_Mean, col = significant)) +
+  geom_point(size=1, alpha = 0.6) +
+  scale_y_log10() +
+  scale_x_log10() +
+  labs( title = "Scatter plot of RNA-seq",
+        color = 'Category',
+        x = expression("Log"[10]*"(meanExpression) in WT"), 
+        y = expression("Log"[10]*"(meanExpression) in LOW")) + 
+  geom_density2d(col="red") +
+  scale_color_manual(values = c("black", "blue"),
+                     labels = c("Not Significant", "Significant"))+
+  #geom_errorbar(data = RnaDdsNormalizedFiltered[1:50,] ,aes(ymin = LOW_Mean - LOW_std, ymax = LOW_Mean + LOW_std), width = 0.1, alpha = 0.2) +
+  #geom_errorbarh(aes(xmin = WT_Mean - WT_std, xmax = WT_Mean + WT_std), height = 0.1, alpha = 0.2) +
+  theme_classic()
+```
+
+#### Correlation Matrix SSample
+
+```{r}
+annotation <- data.frame(Genotype = rnaseq_description$Genotype)
+rownames(annotation) <- rownames(rnaseq_description)
+
+spearman_correlation_matrix <- cor(RnaDdsNormalized[,grepl("^RNA", colnames(RnaDdsNormalized))], method = "spearman")
+dist_from_spearman <- as.dist(1-spearman_correlation_matrix)
+dist_matrix <- as.matrix(dist_from_spearman)
+
+pheatmap(dist_matrix, 
+         clustering_distance_rows = dist_from_spearman,
+         clustering_distance_cols = dist_from_spearman,
+         annotation_row = annotation,
+         annotation_col = annotation,
+         col = plasma(256))
+
+```
+
+```{r}
+RnaDdsNormalized$gene_name <- rownames(RnaDdsNormalized)
+RnaDdsNormalized.long <- 
+  melt(RnaDdsNormalized[,grepl("^RNA", colnames(RnaDdsNormalized)) | colnames(RnaDdsNormalized) == "gene_name"],
+  id.vars = "gene_name",
+  variable_name = "sample_name")
+colnames(RnaDdsNormalized.long)[2] <- "sample_name"
+colnames(RnaDdsNormalized.long)[3] <- "normalized_count"
+RnaDdsNormalized.long <- merge(RnaDdsNormalized.long, rnaseq_description, by ="sample_name")
+head(RnaDdsNormalized.long)
+```
+
+#### Top 10 Up Degs Bar Plot
+
+```{r}
+top10_upregRna <- rownames(top_upregRNA[1:10,])
+
+for (gene in top10_upregRna) {
+  p <- ggplot(RnaDdsNormalized.long[RnaDdsNormalized.long$gene_name == gene, ],
+              aes(x = Genotype, y = normalized_count)) +
+    geom_boxplot(width = 0.1, alpha = 0.5, aes(fill = Genotype)) +
+    geom_jitter(aes(colour = Colonies), width = 0.2, size = 1.5) +
+    labs(title = paste("Expression of", 
+                       MusGeneNames$gene_name[MusGeneNames$gene_id == gene]),
+         y = expression("Normalized Counts"),
+         x = "Genotype") +
+    theme_classic()
+  print(p)
+}
+```
+
+#### Top 10 Down Degs Bar Plot
+
+```{r}
+
+top10_downregRna <- rownames(head(top_downregRNA,10))
+
+for (gene in top10_downregRna) {
+  p <- ggplot(RnaDdsNormalized.long[RnaDdsNormalized.long$gene_name == gene, ],
+              aes(x = Genotype, y = normalized_count)) +
+    geom_boxplot(width = 0.1, alpha = 0.5, aes(fill = Genotype)) +
+    geom_jitter(aes(colour = Colonies), width = 0.2, size = 1.5) +
+    labs(title = paste("Expression of", 
+                       MusGeneNames$gene_name[MusGeneNames$gene_id == gene]),
+         y = expression("Normalized Counts"),
+         x = "Genotype") +
+    theme_classic()
+  print(p)
+}
+```
+
+### Salmon
+
+#### Gene & pre-mRNA
+
+##### Volcano Plot
+
+```{r}
+TxiResVocPlot <- TxiResNoNa[order(TxiResNoNa$padj),]
+TxiResVocPlot$diffexpressed <- "NO"
+TxiResVocPlot$diffexpressed[TxiResVocPlot$log2FoldChange > foldchange_threeshold & TxiResVocPlot$padj < padj_threeshold] <- "UP"
+TxiResVocPlot$diffexpressed[TxiResVocPlot$log2FoldChange < -foldchange_threeshold & TxiResVocPlot$padj < padj_threeshold] <- "DOWN"
+
+ggplot(data = TxiResVocPlot, 
+       aes(x = log2FoldChange, y = -log10(padj), col = diffexpressed)) +
+  geom_vline(xintercept = c(-foldchange_threeshold, foldchange_threeshold), col = "gray", linetype = 'dashed') +
+  geom_hline(yintercept = -log10(padj_threeshold), col = "gray", linetype = 'dashed') +
+  labs(title="Volcano Plot Of RNA-seq",
+       color = 'Category',  
+       x = expression("log"[2]*"(FC)"), 
+       y = expression("-log"[10]*"(padj)")) + 
+  scale_x_continuous(breaks = seq(-14, 14, 2)) +
+  geom_point(size = 1) +
+  scale_color_manual(values = c("#00AFBB", "grey", "#FFDB6D"),
+                     labels = c("Downregulated", "Not significant", "Upregulated"))+
+  theme_classic()
+```
+
+##### Bar Plot Top 20 Degs
+
+```{r}
+TxiUpReg <- TxiResVocPlot[TxiResVocPlot$diffexpressed=="UP",][,1:6]
+TxiDownReg <- TxiResVocPlot[TxiResVocPlot$diffexpressed=="DOWN",][,1:6]
+
+TxiUpReg$neg_log10_padj <- -log10(TxiUpReg$padj)
+TxiDownReg$neg_log10_padj <- -log10(TxiDownReg$padj)
+TxiUpRegSorted <- TxiUpReg[order(-TxiUpReg$log2FoldChange, -TxiUpReg$neg_log10_padj),]
+TxiDownRegSorted <- TxiDownReg[order(TxiDownReg$log2FoldChange, -TxiDownReg$neg_log10_padj),]
+top_upregTxi <- head(TxiUpRegSorted, 20)
+top_downregTxi <- head(TxiDownRegSorted, 20)
+
+top_upregTxi$transcript_id <- rownames(top_upregTxi)
+top_upregTxi$transcript_id <- factor(top_upregTxi$transcript_id, levels = rev(top_upregTxi$transcript_id))
+top_upregTxi$gene_id <- tx2gene$GENEID[match(rownames(top_upregTxi), tx2gene$TXNAME)]
+top_upregTxi$gene_name <- MusGeneNames$gene_name[match(top_upregTxi$gene_id, MusGeneNames$gene_id)]
+
+top_downregTxi$transcript_id <- rownames(top_downregTxi)
+top_downregTxi$transcript_id <- factor(top_downregTxi$transcript_id, levels = rev(top_downregTxi$transcript_id))
+top_downregTxi$gene_id <- tx2gene$GENEID[match(rownames(top_downregTxi), tx2gene$TXNAME)]
+top_downregTxi$gene_name <- MusGeneNames$gene_name[match(top_downregTxi$gene_id, MusGeneNames$gene_id)]
+
+TopUpDegsList <- rownames(top_upregTxi)
+TopDownDegsList <- rownames(top_downregTxi)
+
+ggplot(top_upregTxi, aes(x = transcript_id, y = log2FoldChange)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  coord_flip() +
+  scale_x_discrete(labels = top_upregTxi$gene_name) +
+  labs(title = "Most Upregulated Genes [Salmon RNAseq]", x = "Gene", y = "log2 Fold Change") +
+  theme_minimal()
+
+ggplot(top_downregTxi, aes(x = transcript_id, y = log2FoldChange)) +
+  geom_bar(stat = "identity", fill = "firebrick") +   # reddish color for downregulated
+  coord_flip() +
+  scale_x_discrete(labels = top_downregTxi$gene_name) +
+  labs(title = "Most Downregulated Genes [Salmon RNAseq]", x = "Gene", y = "log2 Fold Change") +
+  theme_minimal()
+```
+
+#####Scatter Plot Mean Expression
+
+```{r}
+TxiDdsNormalized <- data.frame(counts(ddsTxi, normalize=TRUE))
+TxiDdsNormalized$WT_Mean <- unlist(apply(TxiDdsNormalized[,rownames(rnaseq_description[rnaseq_description$Genotype=="WT",])], 1, mean))
+TxiDdsNormalized$LOW_Mean <- unlist(apply(TxiDdsNormalized[,rownames(rnaseq_description[rnaseq_description$Genotype=="LOW",])], 1, mean))
+TxiDdsNormalized$WT_std <- unlist(apply(TxiDdsNormalized[,rownames(rnaseq_description[rnaseq_description$Genotype=="WT",])], 1, sd))
+TxiDdsNormalized$LOW_std <- unlist(apply(TxiDdsNormalized[,rownames(rnaseq_description[rnaseq_description$Genotype=="LOW",])], 1, sd))
+
+TxiDdsNormalizedFiltered <- TxiDdsNormalized %>% filter(WT_Mean > 0,
+                                                        (WT_Mean - WT_std > 0),
+                                                        LOW_Mean > 0,
+                                                        (LOW_Mean - LOW_std > 0))
+TxiResNoNa$index <- rownames(TxiResNoNa)
+TxiDdsNormalizedFiltered$index <- rownames(TxiDdsNormalizedFiltered)
+TxiDdsNormalizedFiltered <- merge(TxiDdsNormalizedFiltered, data.frame(TxiResNoNa[,c(7,10)]), by="index")
+rownames(TxiDdsNormalizedFiltered) <- TxiDdsNormalizedFiltered$index
+TxiDdsNormalizedFiltered <- TxiDdsNormalizedFiltered[,2:length(TxiDdsNormalizedFiltered)]
+
+
+ggplot(TxiDdsNormalizedFiltered, aes(x= WT_Mean, y= LOW_Mean, col = significant)) +
+  geom_point(size=1, alpha = 0.6) +
+  scale_y_log10() +
+  scale_x_log10() +
+  labs( title = "Scatter plot of Salmon RNA-seq",
+        color = 'Category',
+        x = expression("Log"[10]*"(meanExpression) in WT"), 
+        y = expression("Log"[10]*"(meanExpression) in LOW")) + 
+  geom_density2d(col="red") +
+  scale_color_manual(values = c("black", "blue"),
+                     labels = c("Not Significant", "Significant"))+
+  #geom_errorbar(data = TxiDdsNormalizedFiltered[1:50,] ,aes(ymin = LOW_Mean - LOW_std, ymax = LOW_Mean + LOW_std), width = 0.1, alpha = 0.2) +
+  #geom_errorbarh(aes(xmin = WT_Mean - WT_std, xmax = WT_Mean + WT_std), height = 0.1, alpha = 0.2) +
+  theme_classic()
+```
+
+##### Correlation Matrix SSample
+
+```{r}
+annotation <- data.frame(Genotype = rnaseq_description$Genotype)
+rownames(annotation) <- rownames(rnaseq_description)
+
+spearman_correlation_matrix <- cor(TxiDdsNormalized[,grepl("^RNA", colnames(TxiDdsNormalized))], method = "spearman")
+dist_from_spearman <- as.dist(1-spearman_correlation_matrix)
+dist_matrix <- as.matrix(dist_from_spearman)
+
+pheatmap(dist_matrix, 
+         clustering_distance_rows = dist_from_spearman,
+         clustering_distance_cols = dist_from_spearman,
+         annotation_row = annotation,
+         annotation_col = annotation,
+         col = plasma(256))
+
+```
+
+```{r}
+TxiDdsNormalized$gene_name <- rownames(TxiDdsNormalized)
+TxiDdsNormalized.long <- 
+  melt(TxiDdsNormalized[,grepl("^RNA", colnames(TxiDdsNormalized)) | colnames(TxiDdsNormalized) == "gene_name"],
+  id.vars = "gene_name",
+  variable_name = "sample_name")
+colnames(TxiDdsNormalized.long)[2] <- "sample_name"
+colnames(TxiDdsNormalized.long)[3] <- "normalized_count"
+TxiDdsNormalized.long <- merge(TxiDdsNormalized.long, rnaseq_description, by="sample_name")
+head(TxiDdsNormalized.long)
+```
+
+##### Top 10 Up Degs Bar Plot
+
+```{r}
+top10_upregTxi <- rownames(top_upregTxi[1:10,])
+for (gene in top10_upregTxi) {
+  p <- ggplot(TxiDdsNormalized.long[TxiDdsNormalized.long$gene_name == gene, ],
+              aes(x = Genotype, y = normalized_count)) +
+    geom_boxplot(width = 0.1, alpha = 0.5, aes(fill = Genotype)) +
+    geom_jitter(aes(colour = Colonies), width = 0.2, size = 1.5) +
+    labs(title = paste("Expression of", 
+                       MusGeneNames$gene_name[MusGeneNames$gene_id == gene]),
+         y = expression("Normalized Counts"),
+         x = "Genotype") +
+    theme_classic()
+  print(p)
+}
+
+```
+
+##### Top 10 Down Degs Bar Plot
+
+```{r}
+top10_downregTxi <- rownames(top_downregTxi[1:10,])
+
+for (gene in top10_downregTxi) {
+  p <- ggplot(TxiDdsNormalized.long[TxiDdsNormalized.long$gene_name == gene, ],
+              aes(x = Genotype, y = normalized_count)) +
+    geom_boxplot(width = 0.1, alpha = 0.5, aes(fill = Genotype)) +
+    geom_jitter(aes(colour = Colonies), width = 0.2, size = 1.5) +
+    labs(title = paste("Expression of", 
+                       MusGeneNames$gene_name[MusGeneNames$gene_id == gene]),
+         y = expression("Normalized Counts"),
+         x = "Genotype") +
+    theme_classic()
+  print(p)
+}
+```
+
+#### pre-mRNA Only
+
+##### Volcano Plot
+
+```{r}
+TxiTTResVocPlot <- TxiTTResNoNa[order(TxiTTResNoNa$padj),]
+TxiTTResVocPlot$diffexpressed <- "NO"
+TxiTTResVocPlot$diffexpressed[TxiTTResVocPlot$log2FoldChange > foldchange_threeshold & TxiTTResVocPlot$padj < padj_threeshold] <- "UP"
+TxiTTResVocPlot$diffexpressed[TxiTTResVocPlot$log2FoldChange < -foldchange_threeshold & TxiTTResVocPlot$padj < padj_threeshold] <- "DOWN"
+
+ggplot(data = TxiTTResVocPlot, 
+       aes(x = log2FoldChange, y = -log10(padj), col = diffexpressed)) +
+  geom_vline(xintercept = c(-foldchange_threeshold, foldchange_threeshold), col = "gray", linetype = 'dashed') +
+  geom_hline(yintercept = -log10(padj_threeshold), col = "gray", linetype = 'dashed') +
+  labs(title="Volcano Plot Of RNA-seq",
+       color = 'Category',  
+       x = expression("log"[2]*"(FC)"), 
+       y = expression("-log"[10]*"(padj)")) + 
+  scale_x_continuous(breaks = seq(-14, 14, 2)) +
+  geom_point(size = 1) +
+  scale_color_manual(values = c("#00AFBB", "grey", "#FFDB6D"),
+                     labels = c("Downregulated", "Not significant", "Upregulated"))+
+  theme_classic()
+```
+
+##### Bar Plot Top 20 Degs
+
+```{r}
+TxiTTUpReg <- TxiTTResVocPlot[TxiTTResVocPlot$diffexpressed=="UP",][,1:6]
+TxiTTDownReg <- TxiTTResVocPlot[TxiTTResVocPlot$diffexpressed=="DOWN",][,1:6]
+
+TxiTTUpReg$neg_log10_padj <- -log10(TxiTTUpReg$padj)
+TxiTTDownReg$neg_log10_padj <- -log10(TxiTTDownReg$padj)
+TxiTTUpRegSorted <- TxiTTUpReg[order(-TxiTTUpReg$log2FoldChange, -TxiTTUpReg$neg_log10_padj),]
+TxiTTDownRegSorted <- TxiTTDownReg[order(TxiTTDownReg$log2FoldChange, -TxiTTDownReg$neg_log10_padj),]
+top_upregTxiTT <- head(TxiTTUpRegSorted, 20)
+top_downregTxiTT <- head(TxiTTDownRegSorted, 20)
+
+top_upregTxiTT$transcript_id <- rownames(top_upregTxiTT)
+top_upregTxiTT$transcript_id <- factor(top_upregTxiTT$transcript_id, levels = rev(top_upregTxiTT$transcript_id))
+top_upregTxiTT$gene_id <- tx2gene$GENEID[match(rownames(top_upregTxiTT), tx2gene$TXNAME)]
+top_upregTxiTT$gene_name <- MusGeneNames$gene_name[match(top_upregTxiTT$gene_id, MusGeneNames$gene_id)]
+
+top_downregTxiTT$transcript_id <- rownames(top_downregTxiTT)
+top_downregTxiTT$transcript_id <- factor(top_downregTxiTT$transcript_id, levels = rev(top_downregTxiTT$transcript_id))
+top_downregTxiTT$gene_id <- tx2gene$GENEID[match(rownames(top_downregTxiTT), tx2gene$TXNAME)]
+top_downregTxiTT$gene_name <- MusGeneNames$gene_name[match(top_downregTxiTT$gene_id, MusGeneNames$gene_id)]
+
+TopUpDegsList <- rownames(top_upregTxiTT)
+TopDownDegsList <- rownames(top_downregTxiTT)
+
+ggplot(top_upregTxiTT, aes(x = transcript_id, y = log2FoldChange)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  coord_flip() +
+  scale_x_discrete(labels = top_upregTxiTT$gene_name) +
+  labs(title = "Most Upregulated Genes [Salmon RNAseq]", x = "Gene", y = "log2 Fold Change") +
+  theme_minimal()
+
+ggplot(top_downregTxiTT, aes(x = transcript_id, y = log2FoldChange)) +
+  geom_bar(stat = "identity", fill = "firebrick") +   # reddish color for downregulated
+  coord_flip() +
+  scale_x_discrete(labels = top_downregTxiTT$gene_name) +
+  labs(title = "Most Downregulated Genes [Salmon RNAseq]", x = "Gene", y = "log2 Fold Change") +
+  theme_minimal()
+```
+
+#####Scatter Plot Mean Expression
+
+```{r}
+TxiTTDdsNormalized <- data.frame(counts(ddsTxiTT, normalize=TRUE))
+TxiTTDdsNormalized$WT_Mean <- unlist(apply(TxiTTDdsNormalized[,rownames(rnaseq_description[rnaseq_description$Genotype=="WT",])], 1, mean))
+TxiTTDdsNormalized$LOW_Mean <- unlist(apply(TxiTTDdsNormalized[,rownames(rnaseq_description[rnaseq_description$Genotype=="LOW",])], 1, mean))
+TxiTTDdsNormalized$WT_std <- unlist(apply(TxiTTDdsNormalized[,rownames(rnaseq_description[rnaseq_description$Genotype=="WT",])], 1, sd))
+TxiTTDdsNormalized$LOW_std <- unlist(apply(TxiTTDdsNormalized[,rownames(rnaseq_description[rnaseq_description$Genotype=="LOW",])], 1, sd))
+
+TxiTTDdsNormalizedFiltered <- TxiTTDdsNormalized %>% filter(WT_Mean > 0,
+                                                        (WT_Mean - WT_std > 0),
+                                                        LOW_Mean > 0,
+                                                        (LOW_Mean - LOW_std > 0))
+TxiResNoNa$index <- rownames(TxiResNoNa)
+TxiTTDdsNormalizedFiltered$index <- rownames(TxiTTDdsNormalizedFiltered)
+TxiTTDdsNormalizedFiltered <- merge(TxiTTDdsNormalizedFiltered, data.frame(TxiResNoNa[,c(7,10)]), by="index")
+rownames(TxiTTDdsNormalizedFiltered) <- TxiTTDdsNormalizedFiltered$index
+TxiTTDdsNormalizedFiltered <- TxiTTDdsNormalizedFiltered[,2:length(TxiTTDdsNormalizedFiltered)]
+
+
+ggplot(TxiTTDdsNormalizedFiltered, aes(x= WT_Mean, y= LOW_Mean, col = significant)) +
+  geom_point(size=1, alpha = 0.6) +
+  scale_y_log10() +
+  scale_x_log10() +
+  labs( title = "Scatter plot of Salmon RNA-seq",
+        color = 'Category',
+        x = expression("Log"[10]*"(meanExpression) in WT"), 
+        y = expression("Log"[10]*"(meanExpression) in LOW")) + 
+  geom_density2d(col="red") +
+  scale_color_manual(values = c("black", "blue"),
+                     labels = c("Not Significant", "Significant"))+
+  #geom_errorbar(data = TxiDdsNormalizedFiltered[1:50,] ,aes(ymin = LOW_Mean - LOW_std, ymax = LOW_Mean + LOW_std), width = 0.1, alpha = 0.2) +
+  #geom_errorbarh(aes(xmin = WT_Mean - WT_std, xmax = WT_Mean + WT_std), height = 0.1, alpha = 0.2) +
+  theme_classic()
+```
+
+##### Correlation Matrix SSample
+
+```{r}
+annotation <- data.frame(Genotype = rnaseq_description$Genotype)
+rownames(annotation) <- rownames(rnaseq_description)
+
+spearman_correlation_matrix <- cor(TxiTTDdsNormalized[,grepl("^RNA", colnames(TxiTTDdsNormalized))], method = "spearman")
+dist_from_spearman <- as.dist(1-spearman_correlation_matrix)
+dist_matrix <- as.matrix(dist_from_spearman)
+
+pheatmap(dist_matrix, 
+         clustering_distance_rows = dist_from_spearman,
+         clustering_distance_cols = dist_from_spearman,
+         annotation_row = annotation,
+         annotation_col = annotation,
+         col = plasma(256))
+
+```
+
+```{r}
+TxiTTDdsNormalized$gene_name <- rownames(TxiTTDdsNormalized)
+TxiTTDdsNormalized.long <- 
+  melt(TxiTTDdsNormalized[,grepl("^RNA", colnames(TxiTTDdsNormalized)) | colnames(TxiTTDdsNormalized) == "gene_name"],
+  id.vars = "gene_name",
+  variable_name = "sample_name")
+colnames(TxiTTDdsNormalized.long)[2] <- "sample_name"
+colnames(TxiTTDdsNormalized.long)[3] <- "normalized_count"
+TxiTTDdsNormalized.long <- merge(TxiTTDdsNormalized.long, rnaseq_description, by="sample_name")
+head(TxiTTDdsNormalized.long)
+```
+
+##### Top 10 Up Degs Bar Plot
+
+```{r}
+top10_upregTxiTT <- rownames(top_upregTxiTT[1:10,])
+for (gene in top10_upregTxiTT) {
+  p <- ggplot(TxiTTDdsNormalized.long[TxiTTDdsNormalized.long$gene_name == gene, ],
+              aes(x = Genotype, y = normalized_count)) +
+    geom_boxplot(width = 0.1, alpha = 0.5, aes(fill = Genotype)) +
+    geom_jitter(aes(colour = Colonies), width = 0.2, size = 1.5) +
+    labs(title = paste("Expression of", 
+                       MusGeneNames$gene_name[MusGeneNames$gene_id == gene]),
+         y = expression("Normalized Counts"),
+         x = "Genotype") +
+    theme_classic()
+  print(p)
+}
+
+```
+
+##### Top 10 Down Degs Bar Plot
+
+```{r}
+top10_downregTxiTT <- rownames(top_downregTxiTT[1:10,])
+
+for (gene in top10_downregTxiTT) {
+  p <- ggplot(TxiTTDdsNormalized.long[TxiTTDdsNormalized.long$gene_name == gene, ],
+              aes(x = Genotype, y = normalized_count)) +
+    geom_boxplot(width = 0.1, alpha = 0.5, aes(fill = Genotype)) +
+    geom_jitter(aes(colour = Colonies), width = 0.2, size = 1.5) +
+    labs(title = paste("Expression of", 
+                       MusGeneNames$gene_name[MusGeneNames$gene_id == gene]),
+         y = expression("Normalized Counts"),
+         x = "Genotype") +
+    theme_classic()
+  print(p)
+}
+```
+
+#### C1-Removed PremRNA
+
+```{r}
+negateC1 <- !(rnaseq_description$Genotype=="WT" & rnaseq_description$Colonies=="C1")
+rnaseq_description_C1_removed <- rnaseq_description[negateC1,]
+txi_C1Removed <- list(
+  abundance = txi_tx$abundance[,negateC1],
+  counts = txi_tx$counts[,negateC1],
+  length = txi_tx$length[,negateC1],
+  countsFromAbundance = txi_tx$countsFromAbundance
+)
+ddsTxi_C1Removed <- DESeqDataSetFromTximport(txi_C1Removed,
+                                   colData = rnaseq_description_C1_removed,
+                                   design = ~ Genotype)
+ddsTxi_C1Removed <- estimateSizeFactors(ddsTxi_C1Removed, controlGenes = grepl("^FBtr|^PreMrnaDroso", rownames(ddsTxi_C1Removed)))
+premrna_id <- rownames(ddsTxi_C1Removed[grepl("^PreMrnaENS", rownames(ddsTxi_C1Removed))])
+premrna_id <- c(premrna_id, mono_exon_id)
+ddsTxi_C1Removed <- DESeq(ddsTxi_C1Removed[rownames(ddsTxi_C1Removed) %in% premrna_id,])
+
+TxiResC1Removed <- results(ddsTxi_C1Removed, name="Genotype_WT_vs_LOW", contrast=c("Genotype","LOW","WT"))
+TxiResNoNaC1Removed <- TxiResC1Removed[!is.na(TxiResC1Removed$padj) & !is.na(TxiResC1Removed$log2FoldChange), ]
+TxiResNoNaC1Removed$significant <- "Not Significant"
+TxiResNoNaC1Removed$significant[TxiResNoNaC1Removed$padj < padj_threeshold] <- "Significant"
+```
+
+##### MA Plot
+
+```{r}
+plotMA(TxiResNoNaC1Removed)
+
+ggplot(TxiResNoNaC1Removed, aes(x =TxiResNoNaC1Removed$baseMean, 
+                       y = TxiResNoNaC1Removed$log2FoldChange, 
+                       col = significant)) +
+  geom_point(size = 1) +
+  #coord_cartesian(ylim = c(-5, 5)) +
+  labs( title = "MA Plot from Salmon RNA-seq C1 Removed",
+        color = 'Category',
+        x = expression("BaseMean Of Normalized Counts"), 
+        y = expression("Log"[2]*" Fold Change")) + 
+  scale_x_log10() +
+  geom_hline(yintercept = 0, col = "black", linetype = 'dashed', linewidth = 1) +
+  theme_classic() +
+  scale_color_manual(values = c("darkgrey", "blue"),
+                     labels = c("Not Significant", "Significant"))+
+  geom_density2d(col="red")
+```
+
+##### Volcano Plot
+
+```{r}
+TxiTTC1ResVocPlot <- TxiResNoNaC1Removed[order(TxiResNoNaC1Removed$padj),]
+TxiTTC1ResVocPlot$diffexpressed <- "NO"
+TxiTTC1ResVocPlot$diffexpressed[TxiTTC1ResVocPlot$log2FoldChange > foldchange_threeshold & TxiTTC1ResVocPlot$padj < padj_threeshold] <- "UP"
+TxiTTC1ResVocPlot$diffexpressed[TxiTTC1ResVocPlot$log2FoldChange < -foldchange_threeshold & TxiTTC1ResVocPlot$padj < padj_threeshold] <- "DOWN"
+
+ggplot(data = TxiTTC1ResVocPlot, 
+       aes(x = log2FoldChange, y = -log10(padj), col = diffexpressed)) +
+  geom_vline(xintercept = c(-foldchange_threeshold, foldchange_threeshold), col = "gray", linetype = 'dashed') +
+  geom_hline(yintercept = -log10(padj_threeshold), col = "gray", linetype = 'dashed') +
+  labs(title="Volcano Plot Of Salmon RNA-seq C1 removed",
+       color = 'Category',  
+       x = expression("log"[2]*"(FC)"), 
+       y = expression("-log"[10]*"(padj)")) + 
+  scale_x_continuous(breaks = seq(-14, 14, 2)) +
+  geom_point(size = 1) +
+  scale_color_manual(values = c("#00AFBB", "grey", "#FFDB6D"),
+                     labels = c("Downregulated", "Not significant", "Upregulated"))+
+  theme_classic()
+```
+
+##### Bar Plot Top 20 Degs
+
+```{r}
+TxiTTUpRegC1 <- TxiTTC1ResVocPlot[TxiTTC1ResVocPlot$diffexpressed=="UP",][,1:6]
+TxiTTDownRegC1 <- TxiTTC1ResVocPlot[TxiTTC1ResVocPlot$diffexpressed=="DOWN",][,1:6]
+
+TxiTTUpRegC1$neg_log10_padj <- -log10(TxiTTUpRegC1$padj)
+TxiTTDownRegC1$neg_log10_padj <- -log10(TxiTTDownRegC1$padj)
+TxiTTUpRegSortedC1 <- TxiTTUpRegC1[order(-TxiTTUpRegC1$log2FoldChange, -TxiTTUpRegC1$neg_log10_padj),]
+TxiTTDownRegSortedC1 <- TxiTTDownRegC1[order(TxiTTDownRegC1$log2FoldChange, -TxiTTDownRegC1$neg_log10_padj),]
+top_upregTxiTTC1 <- head(TxiTTUpRegSortedC1, 20)
+top_downregTxiTTC1 <- head(TxiTTDownRegSortedC1, 20)
+
+top_upregTxiTTC1$transcript_id <- rownames(top_upregTxiTTC1)
+top_upregTxiTTC1$transcript_id <- factor(top_upregTxiTTC1$transcript_id, levels = rev(top_upregTxiTTC1$transcript_id))
+top_upregTxiTTC1$gene_id <- tx2gene$GENEID[match(rownames(top_upregTxiTTC1), tx2gene$TXNAME)]
+top_upregTxiTTC1$gene_name <- MusGeneNames$gene_name[match(top_upregTxiTTC1$gene_id, MusGeneNames$gene_id)]
+
+top_downregTxiTTC1$transcript_id <- rownames(top_downregTxiTTC1)
+top_downregTxiTTC1$transcript_id <- factor(top_downregTxiTTC1$transcript_id, levels = rev(top_downregTxiTTC1$transcript_id))
+top_downregTxiTTC1$gene_id <- tx2gene$GENEID[match(rownames(top_downregTxiTTC1), tx2gene$TXNAME)]
+top_downregTxiTTC1$gene_name <- MusGeneNames$gene_name[match(top_downregTxiTTC1$gene_id, MusGeneNames$gene_id)]
+
+TopUpDegsList <- rownames(top_upregTxiTTC1)
+TopDownDegsList <- rownames(top_downregTxiTTC1)
+
+ggplot(top_upregTxiTTC1, aes(x = transcript_id, y = log2FoldChange)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  coord_flip() +
+  scale_x_discrete(labels = top_upregTxiTTC1$gene_name) +
+  labs(title = "Most Upregulated Genes [Salmon RNAseq C1 removed]", x = "Gene", y = "log2 Fold Change") +
+  theme_minimal()
+
+ggplot(top_downregTxiTTC1, aes(x = transcript_id, y = log2FoldChange)) +
+  geom_bar(stat = "identity", fill = "firebrick") +   # reddish color for downregulated
+  coord_flip() +
+  scale_x_discrete(labels = top_downregTxiTTC1$gene_name) +
+  labs(title = "Most Downregulated Genes [Salmon RNAseq C1 removed]", x = "Gene", y = "log2 Fold Change") +
+  theme_minimal()
+```
+
+### C1-Removed
+
+```{r}
+rnaseq_C1_removed <- star_rnaseq[,rownames(rnaseq_description_C1_removed)]
+
+rnaseq_dds_C1Removed <- DESeqDataSetFromMatrix(countData = rnaseq_C1_removed,
+                                    colData = rnaseq_description_C1_removed,
+                                    design = ~ Genotype)
+rnaseq_dds_C1Removed <- estimateSizeFactors(rnaseq_dds_C1Removed, controlGenes = grepl("Droso_", rownames(rnaseq_C1_removed)))
+rnaseq_dds_C1Removed <- DESeq(rnaseq_dds_C1Removed[grepl("^ENS", rownames(rnaseq_C1_removed))])
+
+RnaResC1Removed <- results(rnaseq_dds_C1Removed, name="Genotype_WT_vs_LOW", contrast=c("Genotype","LOW","WT"))
+RnaResNoNaC1Removed <- RnaResC1Removed[!is.na(RnaResC1Removed$padj) & !is.na(RnaResC1Removed$log2FoldChange), ]
+RnaResNoNaC1Removed$significant <- "Not Significant"
+RnaResNoNaC1Removed$significant[RnaResNoNaC1Removed$padj < padj_threeshold] <- "Significant"
+
+```
+
+#### MA Plot
+
+```{r}
+plotMA(RnaResNoNaC1Removed)
+
+ggplot(RnaResNoNaC1Removed, aes(x =RnaResNoNaC1Removed$baseMean, 
+                       y = RnaResNoNaC1Removed$log2FoldChange, 
+                       col = significant)) +
+  geom_point(size = 1) +
+  #coord_cartesian(ylim = c(-5, 5)) +
+  labs( title = "MA Plot from Star RNA-seq C1 Removed",
+        color = 'Category',
+        x = expression("BaseMean Of Normalized Counts"), 
+        y = expression("Log"[2]*" Fold Change")) + 
+  scale_x_log10() +
+  geom_hline(yintercept = 0, col = "black", linetype = 'dashed', linewidth = 1) +
+  theme_classic() +
+  scale_color_manual(values = c("darkgrey", "blue"),
+                     labels = c("Not Significant", "Significant"))+
+  geom_density2d(col="red")
+```
+
+#### Volcano Plot
+
+```{r}
+RnaResNoNaC1RemovedVocPlot <- RnaResNoNaC1Removed[order(RnaResNoNaC1Removed$padj),]
+RnaResNoNaC1RemovedVocPlot$diffexpressed <- "NO"
+RnaResNoNaC1RemovedVocPlot$diffexpressed[RnaResNoNaC1RemovedVocPlot$log2FoldChange > foldchange_threeshold & RnaResNoNaC1RemovedVocPlot$padj < padj_threeshold] <- "UP"
+RnaResNoNaC1RemovedVocPlot$diffexpressed[RnaResNoNaC1RemovedVocPlot$log2FoldChange < -foldchange_threeshold & RnaResNoNaC1RemovedVocPlot$padj < padj_threeshold] <- "DOWN"
+
+ggplot(data = RnaResNoNaC1RemovedVocPlot, 
+       aes(x = log2FoldChange, y = -log10(padj), col = diffexpressed)) +
+  geom_vline(xintercept = c(-foldchange_threeshold, foldchange_threeshold), col = "gray", linetype = 'dashed') +
+  geom_hline(yintercept = -log10(padj_threeshold), col = "gray", linetype = 'dashed') +
+  labs(title="Volcano Plot Of Star RNA-seq C1 removed",
+       color = 'Category',  
+       x = expression("log"[2]*"(FC)"), 
+       y = expression("-log"[10]*"(padj)")) + 
+  scale_x_continuous(breaks = seq(-14, 14, 2)) +
+  geom_point(size = 1) +
+  scale_color_manual(values = c("#00AFBB", "grey", "#FFDB6D"),
+                     labels = c("Downregulated", "Not significant", "Upregulated"))+
+  theme_classic()
+```
+
+#### Bar Plot Top 20 Degs
+
+```{r}
+RnaUpRegC1 <- RnaResNoNaC1RemovedVocPlot[RnaResNoNaC1RemovedVocPlot$diffexpressed=="UP",][,1:6]
+RnaDownRegC1 <- RnaResNoNaC1RemovedVocPlot[RnaResNoNaC1RemovedVocPlot$diffexpressed=="DOWN",][,1:6]
+
+RnaUpRegC1$neg_log10_padj <- -log10(RnaUpRegC1$padj)
+RnaDownRegC1$neg_log10_padj <- -log10(RnaDownRegC1$padj)
+RnaUpRegSortedC1 <- RnaUpRegC1[order(-RnaUpRegC1$log2FoldChange, -RnaUpRegC1$neg_log10_padj),]
+RnaDownRegSortedC1 <- RnaDownRegC1[order(RnaDownRegC1$log2FoldChange, -RnaDownRegC1$neg_log10_padj),]
+top_upregRnaC1 <- head(RnaUpRegSortedC1, 20)
+top_downregRnaC1 <- head(RnaDownRegSortedC1, 20)
+
+top_upregRnaC1$gene <- MusGeneNames$gene_name[match(rownames(top_upregRnaC1), MusGeneNames$gene_id)]
+top_upregRnaC1$gene <- factor(top_upregRnaC1$gene, levels = rev(top_upregRnaC1$gene))
+top_downregRnaC1$gene <- MusGeneNames$gene_name[match(rownames(top_downregRnaC1), MusGeneNames$gene_id)]
+top_downregRnaC1$gene <- factor(top_downregRnaC1$gene, levels = rev(top_downregRnaC1$gene))
+
+ggplot(top_upregRnaC1, aes(x = gene, y = log2FoldChange)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  coord_flip() +
+  labs(title = "Most Upregulated Genes [STAR RNAseq C1 removed]", x = "Gene", y = "log2 Fold Change") +
+  theme_minimal()
+
+ggplot(top_downregRnaC1, aes(x = gene, y = log2FoldChange)) +
+  geom_bar(stat = "identity", fill = "firebrick") +   # reddish color for downregulated
+  coord_flip() +
+  labs(title = "Most Downregulated Genes [STAR RNAseq C1 removed]", x = "Gene", y = "log2 Fold Change") +
+  theme_minimal()
+```
+
+## TT-Seq Analysis
+
+### STAR
+
+#### Volcano Plot
+
+```{r}
+TTresVolcPlot <- TTResNoNa[order(TTResNoNa$padj),]
+TTresVolcPlot$diffexpressed <- "NO"
+TTresVolcPlot$diffexpressed[TTresVolcPlot$log2FoldChange > foldchange_threeshold & TTresVolcPlot$padj < padj_threeshold] <- "UP"
+TTresVolcPlot$diffexpressed[TTresVolcPlot$log2FoldChange < -foldchange_threeshold & TTresVolcPlot$padj < padj_threeshold] <- "DOWN"
+
+ggplot(data = TTresVolcPlot, 
+       aes(x = log2FoldChange, y = -log10(padj), col = diffexpressed)) +
+  geom_vline(xintercept = c(-foldchange_threeshold, foldchange_threeshold), col = "gray", linetype = 'dashed') +
+  geom_hline(yintercept = -log10(padj_threeshold), col = "gray", linetype = 'dashed') +
+  labs(title="Volcano Plot Of STAR TT-seq",
+       color = 'Category',  
+       x = expression("log"[2]*"(FC)"), 
+       y = expression("-log"[10]*"(padj)")) + 
+  scale_x_continuous(breaks = seq(-14, 14, 2)) +
+  geom_point(size = 1) +
+  scale_color_manual(values = c("#00AFBB", "grey", "#FFDB6D"),
+                     labels = c("Downregulated", "Not significant", "Upregulated"))+
+  theme_classic()
+```
+
+#### Bar Plot Top 20 Degs
+
+```{r}
+TTUpReg <- TTresVolcPlot[TTresVolcPlot$diffexpressed=="UP",][,1:6]
+TTDownReg <- TTresVolcPlot[TTresVolcPlot$diffexpressed=="DOWN",][,1:6]
+
+TTUpReg$neg_log10_padj <- -log10(TTUpReg$padj)
+TTDownReg$neg_log10_padj <- -log10(TTDownReg$padj)
+TTUpRegSorted <- TTUpReg[order(-TTUpReg$log2FoldChange, -TTUpReg$neg_log10_padj),]
+TTDownRegSorted <- TTDownReg[order(TTDownReg$log2FoldChange, -TTDownReg$neg_log10_padj),]
+
+top_upregTT <- head(TTUpRegSorted, 20)
+top_downregTT <- head(TTDownRegSorted, 20)
+
+top_upregTT$gene <- MusGeneNames$gene_name[match(rownames(top_upregTT), MusGeneNames$gene_id)]
+top_upregTT$gene <- factor(top_upregTT$gene, levels = rev(top_upregTT$gene))
+top_downregTT$gene <- MusGeneNames$gene_name[match(rownames(top_downregTT), MusGeneNames$gene_id)]
+top_downregTT$gene <- factor(top_downregTT$gene, levels = rev(top_downregTT$gene))
+
+ggplot(top_upregTT, aes(x = gene, y = log2FoldChange)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  coord_flip() +
+  labs(title = "Most Upregulated Genes [STAR TT-seq]", x = "Gene", y = "log2 Fold Change") +
+  theme_minimal()
+
+ggplot(top_downregTT, aes(x = gene, y = log2FoldChange)) +
+  geom_bar(stat = "identity", fill = "firebrick") +   
+  coord_flip() +
+  labs(title = "Most Downregulated Genes [STAR TT-seq]", x = "Gene", y = "log2 Fold Change") +
+  theme_minimal()
+```
+
+####Scatter Plot Mean Expression
+
+```{r}
+TTDdsNormalized <- data.frame(counts(ttseq_dds, normalize=TRUE))
+TTDdsNormalized$WT_Mean <- unlist(apply(TTDdsNormalized[,rownames(ttseq_description[ttseq_description$Genotype=="WT",])], 1, mean))
+TTDdsNormalized$LOW_Mean <- unlist(apply(TTDdsNormalized[,rownames(ttseq_description[ttseq_description$Genotype=="LOW",])], 1, mean))
+TTDdsNormalized$WT_std <- unlist(apply(TTDdsNormalized[,rownames(ttseq_description[ttseq_description$Genotype=="WT",])], 1, sd))
+TTDdsNormalized$LOW_std <- unlist(apply(TTDdsNormalized[,rownames(ttseq_description[ttseq_description$Genotype=="LOW",])], 1, sd))
+
+TTDdsNormalizedFiltered <- TTDdsNormalized %>% filter(WT_Mean > 0,
+                                                        (WT_Mean - WT_std > 0),
+                                                        LOW_Mean > 0,
+                                                        (LOW_Mean - LOW_std > 0))
+TTResNoNa$index <- rownames(TTResNoNa)
+TTDdsNormalizedFiltered$index <- rownames(TTDdsNormalizedFiltered)
+TTDdsNormalizedFiltered <- merge(TTDdsNormalizedFiltered, data.frame(TTResNoNa[,c(7,10)]), by="index")
+rownames(TTDdsNormalizedFiltered) <- TTDdsNormalizedFiltered$index
+TTDdsNormalizedFiltered <- TTDdsNormalizedFiltered[,2:length(TTDdsNormalizedFiltered)]
+
+
+ggplot(TTDdsNormalizedFiltered, aes(x= WT_Mean, y= LOW_Mean, col = significant)) +
+  geom_point(size=1, alpha = 0.6) +
+  scale_y_log10() +
+  scale_x_log10() +
+  labs( title = "Scatter plot of STAR TT-seq",
+        color = 'Category',
+        x = expression("Log"[10]*"(meanExpression) in WT"), 
+        y = expression("Log"[10]*"(meanExpression) in LOW")) + 
+  geom_density2d(col="red") +
+  scale_color_manual(values = c("black", "blue"),
+                     labels = c("Not Significant", "Significant"))+
+  #geom_errorbar(data = RnaDdsNormalizedFiltered[1:50,] ,aes(ymin = LOW_Mean - LOW_std, ymax = LOW_Mean + LOW_std), width = 0.1, alpha = 0.2) +
+  #geom_errorbarh(aes(xmin = WT_Mean - WT_std, xmax = WT_Mean + WT_std), height = 0.1, alpha = 0.2) +
+  theme_classic()
+```
+
+#### Correlation Matrix SSample
+
+```{r}
+TTannotation <- data.frame(Genotype = ttseq_description$Genotype)
+rownames(TTannotation) <- rownames(ttseq_description)
+
+TTspearman_correlation_matrix <- cor(TTDdsNormalized[,grepl("^RNA", colnames(TTDdsNormalized))], method = "spearman")
+TTdist_from_spearman <- as.dist(1-TTspearman_correlation_matrix)
+TTdist_matrix <- as.matrix(TTdist_from_spearman)
+
+pheatmap(TTdist_matrix, 
+         clustering_distance_rows = TTdist_from_spearman,
+         clustering_distance_cols = TTdist_from_spearman,
+         annotation_row = TTannotation,
+         annotation_col = TTannotation,
+         col = plasma(256))
+```
+
+#### Top 10 Up Degs Bar Plot
+
+```{r}
+TTDdsNormalized$gene_name <- rownames(TTDdsNormalized)
+TTDdsNormalized.long <- 
+  melt(TTDdsNormalized[,grepl("^RNA", colnames(TTDdsNormalized)) | colnames(TTDdsNormalized) == "gene_name"],
+  id.vars = "gene_name",
+  variable_name = "sample_name")
+colnames(TTDdsNormalized.long)[2] <- "sample_name"
+colnames(TTDdsNormalized.long)[3] <- "normalized_count"
+TTDdsNormalized.long <- merge(TTDdsNormalized.long, ttseq_description, by="sample_name")
+head(TTDdsNormalized.long)
+```
+
+#### Top 10 Down Degs Bar Plot
+
+```{r}
+top10_upregTT <- rownames(top_upregTT[1:10,])
+
+for (gene in top10_upregTT) {
+  p <- ggplot(TTDdsNormalized.long[TTDdsNormalized.long$gene_name == gene, ],
+              aes(x = Genotype, y = normalized_count)) +
+    geom_boxplot(width = 0.1, alpha = 0.5, aes(fill = Genotype)) +
+    geom_jitter(aes(colour = Colonies), width = 0.2, size = 1.5) +
+    labs(title = paste("Expression of", MusGeneNames$gene_name[MusGeneNames$gene_id == gene]),
+         y = expression("Normalized Counts"),
+         x = "Genotype") +
+    theme_classic()
+  print(p)
+}
+```
+
+```{r}
+top10_downregTT <- rownames(top_downregTT[1:10,])
+
+for (gene in top10_downregTT) {
+  p <- ggplot(TTDdsNormalized.long[TTDdsNormalized.long$gene_name == gene, ],
+              aes(x = Genotype, y = normalized_count)) +
+    geom_boxplot(width = 0.1, alpha = 0.5, aes(fill = Genotype)) +
+    geom_jitter(aes(colour = Colonies), width = 0.2, size = 1.5) +
+    labs(title = paste("Expression of", MusGeneNames$gene_name[MusGeneNames$gene_id == gene]),
+         y = expression("Normalized Counts"),
+         x = "Genotype") +
+    theme_classic()
+  print(p)
+}
+```
+
+### Bowtie2
+
+#### Volcano Plot
+
+```{r}
+TTBowtieResVolcPlot <- TTResBowtieNoNa[order(TTResBowtieNoNa$padj),]
+TTBowtieResVolcPlot$diffexpressed <- "NO"
+TTBowtieResVolcPlot$diffexpressed[TTBowtieResVolcPlot$log2FoldChange > foldchange_threeshold & TTBowtieResVolcPlot$padj < padj_threeshold] <- "UP"
+TTBowtieResVolcPlot$diffexpressed[TTBowtieResVolcPlot$log2FoldChange < -foldchange_threeshold & TTBowtieResVolcPlot$padj < padj_threeshold] <- "DOWN"
+
+ggplot(data = TTBowtieResVolcPlot, 
+       aes(x = log2FoldChange, y = -log10(padj), col = diffexpressed)) +
+  geom_vline(xintercept = c(-foldchange_threeshold, foldchange_threeshold), col = "gray", linetype = 'dashed') +
+  geom_hline(yintercept = -log10(padj_threeshold), col = "gray", linetype = 'dashed') +
+  labs(title="Volcano Plot Of Bowtie2 TT-seq",
+       color = 'Category',  
+       x = expression("Log"[2]*"(FC)"), 
+       y = expression("-Log"[10]*"(padj)")) + 
+  scale_x_continuous(breaks = seq(-14, 14, 2)) +
+  geom_point(size = 1) +
+  scale_color_manual(values = c("#00AFBB", "grey", "#FFDB6D"),
+                     labels = c("Downregulated", "Not significant", "Upregulated"))+
+  theme_classic()
+top_upregTxiTT$gene_id <- tx2gene$GENEID[match(rownames(top_upregTxiTT), tx2gene$TXNAME)]
+
+```
+
+#### Bar Plot Top 20 Degs
+
+```{r}
+TTBowtieUpReg <- TTBowtieResVolcPlot[TTBowtieResVolcPlot$diffexpressed=="UP",][,1:6]
+TTBowtieDownReg <- TTBowtieResVolcPlot[TTBowtieResVolcPlot$diffexpressed=="DOWN",][,1:6]
+
+TTBowtieUpReg$neg_log10_padj <- -log10(TTBowtieUpReg$padj)
+TTBowtieDownReg$neg_log10_padj <- -log10(TTBowtieDownReg$padj)
+TTBowtieUpRegSorted <- TTBowtieUpReg[order(-TTBowtieUpReg$log2FoldChange, -TTBowtieUpReg$neg_log10_padj),]
+TTBowtieDownRegSorted <- TTBowtieDownReg[order(TTBowtieDownReg$log2FoldChange, -TTBowtieDownReg$neg_log10_padj),]
+
+top_upregTTBowtie <- head(TTBowtieUpRegSorted, 20)
+top_downregTTBowtie <- head(TTBowtieDownRegSorted, 20)
+
+top_upregTTBowtie$gene <- MusGeneNames$gene_name[match(rownames(top_upregTTBowtie), MusGeneNames$gene_id)]
+top_upregTTBowtie$gene <- factor(top_upregTTBowtie$gene, levels = rev(top_upregTTBowtie$gene))
+top_downregTTBowtie$gene <- MusGeneNames$gene_name[match(rownames(top_downregTTBowtie), MusGeneNames$gene_id)]
+top_downregTTBowtie$gene <- factor(top_downregTTBowtie$gene, levels = rev(top_downregTTBowtie$gene))
+
+TTBowtieUpDegsList <- rownames(top_upregTTBowtie)
+TTBowtieDownDegsList <- rownames(top_downregTTBowtie)
+
+ggplot(top_upregTTBowtie, aes(x = gene, y = log2FoldChange)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  coord_flip() +
+  labs(title = "Most Upregulated Genes [Bowtie2 TT-seq]", x = "Gene", y = "log2 Fold Change") +
+  theme_minimal()
+
+ggplot(top_downregTT, aes(x = gene, y = log2FoldChange)) +
+  geom_bar(stat = "identity", fill = "firebrick") +   
+  coord_flip() +
+  labs(title = "Most Downregulated Genes [Bowtie2 TT-seq]", x = "Gene", y = "log2 Fold Change") +
+  theme_minimal()
+```
+
+####Scatter Plot Mean Expression
+
+```{r}
+TTBowtieDdsNormalized <- data.frame(counts(ttseq_dds, normalize=TRUE))
+TTBowtieDdsNormalized$WT_Mean <- unlist(apply(TTBowtieDdsNormalized[,rownames(ttseq_description[ttseq_description$Genotype=="WT",])], 1, mean))
+TTBowtieDdsNormalized$LOW_Mean <- unlist(apply(TTBowtieDdsNormalized[,rownames(ttseq_description[ttseq_description$Genotype=="LOW",])], 1, mean))
+TTBowtieDdsNormalized$WT_std <- unlist(apply(TTBowtieDdsNormalized[,rownames(ttseq_description[ttseq_description$Genotype=="WT",])], 1, sd))
+TTBowtieDdsNormalized$LOW_std <- unlist(apply(TTBowtieDdsNormalized[,rownames(ttseq_description[ttseq_description$Genotype=="LOW",])], 1, sd))
+
+TTBowtieDdsNormalizedFiltered <- TTBowtieDdsNormalized %>% filter(WT_Mean > 0,
+                                                        (WT_Mean - WT_std > 0),
+                                                        LOW_Mean > 0,
+                                                        (LOW_Mean - LOW_std > 0))
+TTResBowtieNoNa$index <- rownames(TTResBowtieNoNa)
+TTBowtieDdsNormalizedFiltered$index <- rownames(TTBowtieDdsNormalizedFiltered)
+TTBowtieDdsNormalizedFiltered <- merge(TTBowtieDdsNormalizedFiltered, data.frame(TTResBowtieNoNa[,c(7,10)]), by="index")
+rownames(TTBowtieDdsNormalizedFiltered) <- TTBowtieDdsNormalizedFiltered$index
+TTBowtieDdsNormalizedFiltered <- TTBowtieDdsNormalizedFiltered[,2:length(TTBowtieDdsNormalizedFiltered)]
+
+
+ggplot(TTBowtieDdsNormalizedFiltered, aes(x= WT_Mean, y= LOW_Mean, col = significant)) +
+  geom_point(size=1, alpha = 0.6) +
+  scale_y_log10() +
+  scale_x_log10() +
+  labs( title = "Scatter plot of STAR TT-seq",
+        color = 'Category',
+        x = expression("Log"[10]*"(meanExpression) in WT"), 
+        y = expression("Log"[10]*"(meanExpression) in LOW")) + 
+  geom_density2d(col="red") +
+  scale_color_manual(values = c("black", "blue"),
+                     labels = c("Not Significant", "Significant"))+
+  #geom_errorbar(data = RnaDdsNormalizedFiltered[1:50,] ,aes(ymin = LOW_Mean - LOW_std, ymax = LOW_Mean + LOW_std), width = 0.1, alpha = 0.2) +
+  #geom_errorbarh(aes(xmin = WT_Mean - WT_std, xmax = WT_Mean + WT_std), height = 0.1, alpha = 0.2) +
+  theme_classic()
+```
+
+#### Correlation Matrix SSample
+
+```{r}
+TTBowtieannotation <- data.frame(Genotype = ttseq_description$Genotype)
+rownames(TTBowtieannotation) <- rownames(ttseq_description)
+
+TTBowtieSpearman_correlation_matrix <- cor(TTBowtieDdsNormalized[,grepl("^RNA", colnames(TTBowtieDdsNormalized))], method = "spearman")
+TTBowtiedist_from_spearman <- as.dist(1-TTBowtieSpearman_correlation_matrix)
+TTBowtiedist_matrix <- as.matrix(TTBowtiedist_from_spearman)
+
+pheatmap(TTBowtiedist_matrix, 
+         clustering_distance_rows = TTBowtiedist_from_spearman,
+         clustering_distance_cols = TTBowtiedist_from_spearman,
+         annotation_row = TTBowtieannotation,
+         annotation_col = TTBowtieannotation,
+         col = plasma(256))
+```
+
+#### Top 10 Up Degs Bar Plot
+
+```{r}
+TTBowtieDdsNormalized$gene_name <- rownames(TTBowtieDdsNormalized)
+TTBowtieDdsNormalized.long <- 
+  melt(TTDdsNormalized[,grepl("^RNA", colnames(TTBowtieDdsNormalized)) | colnames(TTBowtieDdsNormalized) == "gene_name"],
+  id.vars = "gene_name",
+  variable_name = "sample_name")
+colnames(TTBowtieDdsNormalized.long)[2] <- "sample_name"
+colnames(TTBowtieDdsNormalized.long)[3] <- "normalized_count"
+TTBowtieDdsNormalized.long <- merge(TTBowtieDdsNormalized.long, ttseq_description, by="sample_name")
+head(TTBowtieDdsNormalized.long)
+```
+
+#### Top 10 Up Degs Bar Plot
+
+```{r}
+top10_upregTTBowtie <- rownames(top_upregTTBowtie[1:10,])
+
+for (gene in top10_upregTTBowtie) {
+  p <- ggplot(TTBowtieDdsNormalized.long[TTBowtieDdsNormalized.long$gene_name == gene, ],
+              aes(x = Genotype, y = normalized_count)) +
+    geom_boxplot(width = 0.1, alpha = 0.5, aes(fill = Genotype)) +
+    geom_jitter(aes(colour = Colonies), width = 0.2, size = 1.5) +
+    labs(title = paste("Expression of", MusGeneNames$gene_name[MusGeneNames$gene_id == gene]),
+         y = expression("Normalized Counts"),
+         x = "Genotype") +
+    theme_classic()
+  print(p)
+}
+```
+
+#### Top 10 Down Degs Bar Plot
+
+```{r}
+top10_downregTTBowtie <- rownames(top_downregTTBowtie[1:10,])
+
+for (gene in top10_downregTTBowtie) {
+  p <- ggplot(TTBowtieDdsNormalized.long[TTBowtieDdsNormalized.long$gene_name == gene, ],
+              aes(x = Genotype, y = normalized_count)) +
+    geom_boxplot(width = 0.1, alpha = 0.5, aes(fill = Genotype)) +
+    geom_jitter(aes(colour = Colonies), width = 0.2, size = 1.5) +
+    labs(title = paste("Expression of", MusGeneNames$gene_name[MusGeneNames$gene_id == gene]),
+         y = expression("Normalized Counts"),
+         x = "Genotype") +
+    theme_classic()
+  print(p)
+}
+```
+
+```{r}
+p <- ggplot(TTBowtieDdsNormalized.long[TTBowtieDdsNormalized.long$gene_name == top10_downregTTBowtie[1], ],
+              aes(x = Genotype, y = normalized_count)) +
+    geom_boxplot(width = 0.1, alpha = 0.5, aes(fill = Genotype)) +
+    geom_jitter(aes(colour = Colonies), width = 0.2, size = 1.5) +
+    labs(title = paste("Bowtie2 TT-seq of", MusGeneNames$gene_name[MusGeneNames$gene_id == top10_downregTTBowtie[1]]),
+         y = expression("Normalized Counts"),
+         x = "Genotype") +
+    theme_classic()
+p1 <- ggplot(TTDdsNormalized.long[TTDdsNormalized.long$gene_name == top10_downregTTBowtie[1], ],
+            aes(x = Genotype, y = normalized_count)) +
+  geom_boxplot(width = 0.1, alpha = 0.5, aes(fill = Genotype)) +
+  geom_jitter(aes(colour = Colonies), width = 0.2, size = 1.5) +
+  labs(title = paste("STAR TT-seq of", MusGeneNames$gene_name[MusGeneNames$gene_id == top10_downregTTBowtie[1]]),
+       y = expression("Normalized Counts"),
+       x = "Genotype") +
+  theme_classic()
+p2 <- ggplot(RnaDdsNormalized.long[RnaDdsNormalized.long$gene_name == top10_downregTTBowtie[1], ],
+            aes(x = Genotype, y = normalized_count)) +
+  geom_boxplot(width = 0.1, alpha = 0.5, aes(fill = Genotype)) +
+  geom_jitter(aes(colour = Colonies), width = 0.2, size = 1.5) +
+  labs(title = paste("RNA-seq of", MusGeneNames$gene_name[MusGeneNames$gene_id == top10_downregTTBowtie[1]]),
+       y = expression("Normalized Counts"),
+       x = "Genotype") +
+  theme_classic()
+p+p1+p2
+
+```
+
+### C1-Removed-Bowtie2
+
+#### DESeq-Genotype
+
+```{r}
+ttseq_description_C1_removed <- ttseq_description[!(ttseq_description$Genotype=="WT" & ttseq_description$Colonies=="C1"),]
+bowtie_ttseq_C1_removed <- bowtie_ttseq[,rownames(ttseq_description_C1_removed)]
+
+ttseq_dds_c1_removed.G <- DESeqDataSetFromMatrix(countData = bowtie_ttseq_C1_removed,
+                                    colData = ttseq_description_C1_removed,
+                                    design = ~ Genotype)
+ttseq_dds_c1_removed.G <- estimateSizeFactors(ttseq_dds_c1_removed.G, controlGenes = grepl("Droso_", rownames(bowtie_ttseq_C1_removed)))
+ttseq_dds_c1_removed.G <- DESeq(ttseq_dds_c1_removed.G[grepl("^ENS", rownames(bowtie_ttseq_C1_removed))])
+
+TtResC1Removed.G <- results(ttseq_dds_c1_removed.G, name="Genotype_WT_vs_LOW", contrast=c("Genotype","LOW","WT"))
+TtResNoNaC1Removed.G <- TtResC1Removed.G[!is.na(TtResC1Removed.G$padj) & !is.na(TtResC1Removed.G$log2FoldChange), ]
+TtResNoNaC1Removed.G$significant <- "Not Significant"
+TtResNoNaC1Removed.G$significant[TtResNoNaC1Removed.G$padj < padj_threeshold] <- "Significant"
+
+```
+
+##### MA Plot
+
+```{r}
+plotMA(TtResNoNaC1Removed.G)
+
+ggplot(TtResNoNaC1Removed.G, aes(x =TtResNoNaC1Removed.G$baseMean, 
+                       y = TtResNoNaC1Removed.G$log2FoldChange, 
+                       col = significant)) +
+  geom_point(size = 1) +
+  #coord_cartesian(ylim = c(-5, 5)) +
+  labs( title = "MA Plot from Bowtie2 TT-seq C1 Removed",
+        color = 'Category',
+        x = expression("BaseMean Of Normalized Counts"), 
+        y = expression("Log"[2]*" Fold Change")) + 
+  scale_x_log10() +
+  geom_hline(yintercept = 0, col = "black", linetype = 'dashed', linewidth = 1) +
+  theme_classic() +
+  scale_color_manual(values = c("darkgrey", "blue"),
+                     labels = c("Not Significant", "Significant"))+
+  geom_density2d(col="red")
+```
+
+##### QQ Plot
+
+```{r}
+TtResNoNaC1Removed.G$PvalueSorted <- -log10(sort(TtResNoNaC1Removed.G$pvalue))
+TtResNoNaC1Removed.G$PvalueExpected <- -log10(ppoints(length(TtResNoNaC1Removed.G$PvalueSorted)))
+
+
+ggplot(TtResNoNaC1Removed.G, aes(PvalueSorted, PvalueExpected)) +
+  geom_point(size = 1) +
+    geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "gray") +
+  labs(title = "QQ Plot of Bowtie2 TT-seq C1 Removed",
+       x = expression("Observed -Log"[10]*" pvalue"), 
+       y = expression("Expected -Log"[10]*" pvalue")) + 
+  scale_x_log10() +
+  scale_y_log10() +
+  theme_classic()
+
+```
+
+##### Volcano Plot
+
+```{r}
+TTseqC1Removed.G_VocPlot <- TtResNoNaC1Removed.G[order(TtResNoNaC1Removed.G$padj),]
+TTseqC1Removed.G_VocPlot$diffexpressed <- "NO"
+TTseqC1Removed.G_VocPlot$diffexpressed[TTseqC1Removed.G_VocPlot$log2FoldChange > foldchange_threeshold & TTseqC1Removed.G_VocPlot$padj < padj_threeshold] <- "UP"
+TTseqC1Removed.G_VocPlot$diffexpressed[TTseqC1Removed.G_VocPlot$log2FoldChange < -foldchange_threeshold & TTseqC1Removed.G_VocPlot$padj < padj_threeshold] <- "DOWN"
+
+ggplot(data = TTseqC1Removed.G_VocPlot, 
+       aes(x = log2FoldChange, y = -log10(padj), col = diffexpressed)) +
+  geom_vline(xintercept = c(-foldchange_threeshold, foldchange_threeshold), col = "gray", linetype = 'dashed') +
+  geom_hline(yintercept = -log10(padj_threeshold), col = "gray", linetype = 'dashed') +
+  labs(title="Volcano Plot Of Bowtie2 TT-seq C1 Removed",
+       color = 'Category',  
+       x = expression("log"[2]*"(FC)"), 
+       y = expression("-log"[10]*"(padj)")) + 
+  scale_x_continuous(breaks = seq(-14, 14, 2)) +
+  geom_point(size = 1) +
+  scale_color_manual(values = c("#00AFBB", "grey", "#FFDB6D"),
+                     labels = c("Downregulated", "Not significant", "Upregulated"))+
+  theme_classic()
+```
+
+##### Bar Plot Top 20 Degs
+
+```{r}
+TTC1RemovedUpReg.G <- TTseqC1Removed.G_VocPlot[TTseqC1Removed.G_VocPlot$diffexpressed=="UP",][,1:6]
+TTC1RemovedDownReg.G <- TTseqC1Removed.G_VocPlot[TTseqC1Removed.G_VocPlot$diffexpressed=="DOWN",][,1:6]
+
+TTC1RemovedUpReg.G$neg_log10_padj <- -log10(TTC1RemovedUpReg.G$padj)
+TTC1RemovedDownReg.G$neg_log10_padj <- -log10(TTC1RemovedDownReg.G$padj)
+TTC1RemovedUpRegSorted.G <- TTC1RemovedUpReg.G[order(-TTC1RemovedUpReg.G$log2FoldChange, -TTC1RemovedUpReg.G$neg_log10_padj),]
+TTC1RemovedDownRegSorted.G <- TTC1RemovedDownReg.G[order(TTC1RemovedDownReg.G$log2FoldChange, -TTC1RemovedDownReg.G$neg_log10_padj),]
+top_upregTTC1Removed.G <- head(TTC1RemovedUpRegSorted.G, 50)
+top_downregTTC1Removed.G <- head(TTC1RemovedDownRegSorted.G, 50)
+
+top_upregTTC1Removed.G$gene <- MusGeneNames$gene_name[match(rownames(top_upregTTC1Removed.G), MusGeneNames$gene_id)]
+top_upregTTC1Removed.G$gene <- factor(top_upregTTC1Removed.G$gene, levels = rev(top_upregTTC1Removed.G$gene))
+top_downregTTC1Removed.G$gene <- MusGeneNames$gene_name[match(rownames(top_downregTTC1Removed.G), MusGeneNames$gene_id)]
+top_downregTTC1Removed.G$gene <- factor(top_downregTTC1Removed.G$gene, levels = rev(top_downregTTC1Removed.G$gene))
+
+
+ggplot(top_upregTTC1Removed.G, aes(x = gene, y = log2FoldChange)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  coord_flip() +
+  labs(title = "Most Upregulated Genes [Bowtie TTseq C1 Removed]", x = "Gene", y = "log2 Fold Change") +
+  theme_minimal()
+
+ggplot(top_downregTTC1Removed.G, aes(x = gene, y = log2FoldChange)) +
+  geom_bar(stat = "identity", fill = "firebrick") +  
+  coord_flip() +
+  labs(title = "Most Downregulated Genes [Bowtie TTseq C1 Removed]", x = "Gene", y = "log2 Fold Change") +
+  theme_minimal()
+```
+
+##### Scatter Plot Mean Expression
+
+```{r}
+TTseqC1RemovedNormalized.G <- data.frame(counts(ttseq_dds_c1_removed.G, normalize=TRUE))
+TTseqC1RemovedNormalized.G$WT_Mean <- unlist(apply(TTseqC1RemovedNormalized.G[,rownames(ttseq_description_C1_removed[ttseq_description_C1_removed$Genotype=="WT",])], 1, mean))
+TTseqC1RemovedNormalized.G$LOW_Mean <- unlist(apply(TTseqC1RemovedNormalized.G[,rownames(ttseq_description_C1_removed[ttseq_description_C1_removed$Genotype=="LOW",])], 1, mean))
+TTseqC1RemovedNormalized.G$WT_std <- unlist(apply(TTseqC1RemovedNormalized.G[,rownames(ttseq_description_C1_removed[ttseq_description_C1_removed$Genotype=="WT",])], 1, sd))
+TTseqC1RemovedNormalized.G$LOW_std <- unlist(apply(TTseqC1RemovedNormalized.G[,rownames(ttseq_description_C1_removed[ttseq_description_C1_removed$Genotype=="LOW",])], 1, sd))
+
+TTseqC1RemovedNormalizedFiltered.G <- TTseqC1RemovedNormalized.G %>% filter(WT_Mean > 0,
+                                                        (WT_Mean - WT_std > 0),
+                                                        LOW_Mean > 0,
+                                                        (LOW_Mean - LOW_std > 0))
+TtResNoNaC1Removed.G$index <- rownames(TtResNoNaC1Removed.G)
+TTseqC1RemovedNormalizedFiltered.G$index <- rownames(TTseqC1RemovedNormalizedFiltered.G)
+TTseqC1RemovedNormalizedFiltered.G <- merge(TTseqC1RemovedNormalizedFiltered.G, data.frame(TtResNoNaC1Removed.G[,c(7,10)]), by="index")
+rownames(TTseqC1RemovedNormalizedFiltered.G) <- TTseqC1RemovedNormalizedFiltered.G$index
+TTseqC1RemovedNormalizedFiltered.G <- TTseqC1RemovedNormalizedFiltered.G[,2:length(TTseqC1RemovedNormalizedFiltered.G)]
+
+
+ggplot(TTseqC1RemovedNormalizedFiltered.G, aes(x= WT_Mean, y= LOW_Mean, col = significant)) +
+  geom_point(size=1, alpha = 0.6) +
+  scale_y_log10() +
+  scale_x_log10() +
+  labs( title = "Scatter plot of Bowtie2 TT-seq C1 Removed",
+        color = 'Category',
+        x = expression("Log"[10]*"(meanExpression) in WT"), 
+        y = expression("Log"[10]*"(meanExpression) in LOW")) + 
+  geom_density2d(col="red") +
+  scale_color_manual(values = c("black", "blue"),
+                     labels = c("Not Significant", "Significant"))+
+  #geom_errorbar(data = TTseqC1RemovedNormalizedFiltered.G[1:50,] ,aes(ymin = LOW_Mean - LOW_std, ymax = LOW_Mean + LOW_std), width = 0.1, alpha = 0.2) +
+  #geom_errorbarh(aes(xmin = WT_Mean - WT_std, xmax = WT_Mean + WT_std), height = 0.1, alpha = 0.2) +
+  theme_classic()
+```
+
+##### Correlation Matrix SSample
+
+```{r}
+annotation <- data.frame(Genotype = ttseq_description_C1_removed$Genotype)
+rownames(annotation) <- rownames(ttseq_description_C1_removed)
+
+spearman_correlation_matrix <- cor(TTseqC1RemovedNormalized.G[,grepl("^RNA", colnames(TTseqC1RemovedNormalized.G))], method = "spearman")
+dist_from_spearman <- as.dist(1-spearman_correlation_matrix)
+dist_matrix <- as.matrix(dist_from_spearman)
+
+pheatmap(dist_matrix, 
+         clustering_distance_rows = dist_from_spearman,
+         clustering_distance_cols = dist_from_spearman,
+         annotation_row = annotation,
+         annotation_col = annotation,
+         col = plasma(256))
+
+```
+
+```{r}
+TTseqC1RemovedNormalized.G$gene_name <- rownames(TTseqC1RemovedNormalized.G)
+TTseqC1RemovedNormalizedLong.G <- 
+  melt(TTseqC1RemovedNormalized.G[,grepl("^RNA", colnames(TTseqC1RemovedNormalized.G)) | colnames(TTseqC1RemovedNormalized.G) == "gene_name"],
+  id.vars = "gene_name",
+  variable_name = "sample_name")
+colnames(TTseqC1RemovedNormalizedLong.G)[2] <- "sample_name"
+colnames(TTseqC1RemovedNormalizedLong.G)[3] <- "normalized_count"
+TTseqC1RemovedNormalizedLong.G <- merge(TTseqC1RemovedNormalizedLong.G, ttseq_description_C1_removed, by="sample_name")
+head(TTseqC1RemovedNormalizedLong.G)
+```
+
+##### Top 10 Up Degs Bar Plot
+
+```{r}
+top10_upregTTseqC1Removed.G <- rownames(top_upregTTC1Removed.G[1:10,])
+for (gene in top10_upregTTseqC1Removed.G) {
+  p <- ggplot(TTseqC1RemovedNormalizedLong.G[TTseqC1RemovedNormalizedLong.G$gene_name == gene, ],
+              aes(x = Genotype, y = normalized_count)) +
+    geom_boxplot(width = 0.1, alpha = 0.5, aes(fill = Genotype)) +
+    geom_jitter(aes(colour = Colonies), width = 0.2, size = 1.5) +
+    labs(title = paste("Expression of", 
+                       MusGeneNames$gene_name[MusGeneNames$gene_id == gene]),
+         y = expression("Normalized Counts"),
+         x = "Genotype") +
+    theme_classic()
+  print(p)
+}
+
+```
+
+##### Top 10 Down Degs Bar Plot
+
+```{r}
+top10_downregTTseqC1Removed.G <- rownames(head(top_downregTTC1Removed.G, 10))
+
+for (gene in top10_downregTTseqC1Removed.G) {
+  p <- ggplot(TTseqC1RemovedNormalizedLong.G[TTseqC1RemovedNormalizedLong.G$gene_name == gene, ],
+              aes(x = Genotype, y = normalized_count)) +
+    geom_boxplot(width = 0.1, alpha = 0.5, aes(fill = Genotype)) +
+    geom_jitter(aes(colour = Colonies), width = 0.2, size = 1.5) +
+    labs(title = paste("Expression of", 
+                       MusGeneNames$gene_name[MusGeneNames$gene_id == gene]),
+         y = expression("Normalized Counts"),
+         x = "Genotype") +
+    theme_classic()
+  print(p)
+}
+```
+
+#### DESeq-Genotype-Replicate
+
+```{r}
+ttseq_dds_c1_removed.GR <- DESeqDataSetFromMatrix(countData = bowtie_ttseq_C1_removed,
+                                    colData = ttseq_description_C1_removed,
+                                    design = ~ Replicate + Genotype)
+ttseq_dds_c1_removed.GR <- estimateSizeFactors(ttseq_dds_c1_removed.GR, controlGenes = grepl("Droso_", rownames(bowtie_ttseq_C1_removed)))
+ttseq_dds_c1_removed.GR <- DESeq(ttseq_dds_c1_removed.GR[grepl("^ENS", rownames(bowtie_ttseq_C1_removed))])
+
+TtResC1Removed.GR <- results(ttseq_dds_c1_removed.GR, name="Genotype_WT_vs_LOW", contrast=c("Genotype","LOW","WT"))
+TtResNoNaC1Removed.GR <- TtResC1Removed.GR[!is.na(TtResC1Removed.GR$padj) & !is.na(TtResC1Removed.GR$log2FoldChange), ]
+TtResNoNaC1Removed.GR$significant <- "Not Significant"
+TtResNoNaC1Removed.GR$significant[TtResNoNaC1Removed.GR$padj < padj_threeshold] <- "Significant"
+
+```
+
+##### MA Plot
+
+```{r}
+plotMA(TtResNoNaC1Removed.GR)
+
+ggplot(TtResNoNaC1Removed.GR, aes(x =TtResNoNaC1Removed.GR$baseMean, 
+                       y = TtResNoNaC1Removed.GR$log2FoldChange, 
+                       col = significant)) +
+  geom_point(size = 1) +
+  #coord_cartesian(ylim = c(-5, 5)) +
+  labs( title = "MA Plot from Bowtie2 TT-seq C1 Removed - Genotype + Replicate",
+        color = 'Category',
+        x = expression("BaseMean Of Normalized Counts"), 
+        y = expression("Log"[2]*" Fold Change")) + 
+  scale_x_log10() +
+  geom_hline(yintercept = 0, col = "black", linetype = 'dashed', linewidth = 1) +
+  theme_classic() +
+  scale_color_manual(values = c("darkgrey", "blue"),
+                     labels = c("Not Significant", "Significant"))+
+  geom_density2d(col="red")
+```
+
+##### QQ Plot
+
+```{r}
+TtResNoNaC1Removed.GR$PvalueSorted <- -log10(sort(TtResNoNaC1Removed.GR$pvalue))
+TtResNoNaC1Removed.GR$PvalueExpected <- -log10(ppoints(length(TtResNoNaC1Removed.GR$PvalueSorted)))
+
+
+ggplot(TtResNoNaC1Removed.GR, aes(PvalueSorted, PvalueExpected)) +
+  geom_point(size = 1) +
+    geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "gray") +
+  labs(title = "QQ Plot of Bowtie2 TT-seq C1 Removed - Genotype + Replicate",
+       x = expression("Observed -Log"[10]*" pvalue"), 
+       y = expression("Expected -Log"[10]*" pvalue")) + 
+  scale_x_log10() +
+  scale_y_log10() +
+  theme_classic()
+
+```
+
+##### Volcano Plot
+
+```{r}
+TTseqC1Removed.GR_VocPlot <- TtResNoNaC1Removed.GR[order(TtResNoNaC1Removed.GR$padj),]
+TTseqC1Removed.GR_VocPlot$diffexpressed <- "NO"
+TTseqC1Removed.GR_VocPlot$diffexpressed[TTseqC1Removed.GR_VocPlot$log2FoldChange > foldchange_threeshold & TTseqC1Removed.GR_VocPlot$padj < padj_threeshold] <- "UP"
+TTseqC1Removed.GR_VocPlot$diffexpressed[TTseqC1Removed.GR_VocPlot$log2FoldChange < -foldchange_threeshold & TTseqC1Removed.GR_VocPlot$padj < padj_threeshold] <- "DOWN"
+
+ggplot(data = TTseqC1Removed.GR_VocPlot, 
+       aes(x = log2FoldChange, y = -log10(padj), col = diffexpressed)) +
+  geom_vline(xintercept = c(-foldchange_threeshold, foldchange_threeshold), col = "gray", linetype = 'dashed') +
+  geom_hline(yintercept = -log10(padj_threeshold), col = "gray", linetype = 'dashed') +
+  labs(title="Volcano Plot Of Bowtie2 TT-seq C1 Removed - Genotype + Replicate",
+       color = 'Category',  
+       x = expression("log"[2]*"(FC)"), 
+       y = expression("-log"[10]*"(padj)")) + 
+  scale_x_continuous(breaks = seq(-14, 14, 2)) +
+  geom_point(size = 1) +
+  scale_color_manual(values = c("#00AFBB", "grey", "#FFDB6D"),
+                     labels = c("Downregulated", "Not significant", "Upregulated"))+
+  theme_classic()
+```
+
+##### Bar Plot Top 20 Degs
+
+```{r}
+TTC1RemovedUpReg.GR <- TTseqC1Removed.GR_VocPlot[TTseqC1Removed.GR_VocPlot$diffexpressed=="UP",][,1:6]
+TTC1RemovedDownReg.GR <- TTseqC1Removed.GR_VocPlot[TTseqC1Removed.GR_VocPlot$diffexpressed=="DOWN",][,1:6]
+
+TTC1RemovedUpReg.GR$neg_log10_padj <- -log10(TTC1RemovedUpReg.GR$padj)
+TTC1RemovedDownReg.GR$neg_log10_padj <- -log10(TTC1RemovedDownReg.GR$padj)
+TTC1RemovedUpRegSorted.GR <- TTC1RemovedUpReg.GR[order(-TTC1RemovedUpReg.GR$log2FoldChange, -TTC1RemovedUpReg.GR$neg_log10_padj),]
+TTC1RemovedDownRegSorted.GR <- TTC1RemovedDownReg.GR[order(TTC1RemovedDownReg.GR$log2FoldChange, -TTC1RemovedDownReg.GR$neg_log10_padj),]
+top_upregTTC1Removed.GR <- head(TTC1RemovedUpRegSorted.GR, 50)
+top_downregTTC1Removed.GR <- head(TTC1RemovedDownRegSorted.GR, 50)
+
+top_upregTTC1Removed.GR$gene <- MusGeneNames$gene_name[match(rownames(top_upregTTC1Removed.GR), MusGeneNames$gene_id)]
+top_upregTTC1Removed.GR$gene <- factor(top_upregTTC1Removed.GR$gene, levels = rev(top_upregTTC1Removed.GR$gene))
+top_downregTTC1Removed.GR$gene <- MusGeneNames$gene_name[match(rownames(top_downregTTC1Removed.GR), MusGeneNames$gene_id)]
+top_downregTTC1Removed.GR$gene <- factor(top_downregTTC1Removed.GR$gene, levels = rev(top_downregTTC1Removed.GR$gene))
+
+
+ggplot(top_upregTTC1Removed.GR, aes(x = gene, y = log2FoldChange)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  coord_flip() +
+  labs(title = "Most Upregulated Genes [Bowtie TTseq C1 Removed - Genotype + Replicate]", x = "Gene", y = "log2 Fold Change") +
+  theme_minimal()
+
+ggplot(top_downregTTC1Removed.GR, aes(x = gene, y = log2FoldChange)) +
+  geom_bar(stat = "identity", fill = "firebrick") +  
+  coord_flip() +
+  labs(title = "Most Downregulated Genes [Bowtie TTseq C1 Removed - Genotype + Replicate]", x = "Gene", y = "log2 Fold Change") +
+  theme_minimal()
+```
+
+#####Scatter Plot Mean Expression
+
+```{r}
+TTseqC1RemovedNormalized.GR <- data.frame(counts(ttseq_dds_c1_removed.GR, normalize=TRUE))
+TTseqC1RemovedNormalized.GR$WT_Mean <- unlist(apply(TTseqC1RemovedNormalized.GR[,rownames(ttseq_description_C1_removed[ttseq_description_C1_removed$Genotype=="WT",])], 1, mean))
+TTseqC1RemovedNormalized.GR$LOW_Mean <- unlist(apply(TTseqC1RemovedNormalized.GR[,rownames(ttseq_description_C1_removed[ttseq_description_C1_removed$Genotype=="LOW",])], 1, mean))
+TTseqC1RemovedNormalized.GR$WT_std <- unlist(apply(TTseqC1RemovedNormalized.GR[,rownames(ttseq_description_C1_removed[ttseq_description_C1_removed$Genotype=="WT",])], 1, sd))
+TTseqC1RemovedNormalized.GR$LOW_std <- unlist(apply(TTseqC1RemovedNormalized.GR[,rownames(ttseq_description_C1_removed[ttseq_description_C1_removed$Genotype=="LOW",])], 1, sd))
+
+TTseqC1RemovedNormalizedFiltered.GR <- TTseqC1RemovedNormalized.GR %>% filter(WT_Mean > 0,
+                                                        (WT_Mean - WT_std > 0),
+                                                        LOW_Mean > 0,
+                                                        (LOW_Mean - LOW_std > 0))
+TtResNoNaC1Removed.GR$index <- rownames(TtResNoNaC1Removed.GR)
+TTseqC1RemovedNormalizedFiltered.GR$index <- rownames(TTseqC1RemovedNormalizedFiltered.GR)
+TTseqC1RemovedNormalizedFiltered.GR <- merge(TTseqC1RemovedNormalizedFiltered.GR, data.frame(TtResNoNaC1Removed.GR[,c(7,10)]), by="index")
+rownames(TTseqC1RemovedNormalizedFiltered.GR) <- TTseqC1RemovedNormalizedFiltered.GR$index
+TTseqC1RemovedNormalizedFiltered.GR <- TTseqC1RemovedNormalizedFiltered.GR[,2:length(TTseqC1RemovedNormalizedFiltered.GR)]
+
+
+ggplot(TTseqC1RemovedNormalizedFiltered.GR, aes(x= WT_Mean, y= LOW_Mean, col = significant)) +
+  geom_point(size=1, alpha = 0.6) +
+  scale_y_log10() +
+  scale_x_log10() +
+  labs( title = "Scatter plot of Bowtie2 TT-seq C1 Removed - Genotype + Replicate",
+        color = 'Category',
+        x = expression("Log"[10]*"(meanExpression) in WT"), 
+        y = expression("Log"[10]*"(meanExpression) in LOW")) + 
+  geom_density2d(col="red") +
+  scale_color_manual(values = c("black", "blue"),
+                     labels = c("Not Significant", "Significant"))+
+  #geom_errorbar(data = TTseqC1RemovedNormalizedFiltered.G[1:50,] ,aes(ymin = LOW_Mean - LOW_std, ymax = LOW_Mean + LOW_std), width = 0.1, alpha = 0.2) +
+  #geom_errorbarh(aes(xmin = WT_Mean - WT_std, xmax = WT_Mean + WT_std), height = 0.1, alpha = 0.2) +
+  theme_classic()
+```
+
+##### Correlation Matrix SSample
+
+```{r}
+annotation <- data.frame(Genotype = ttseq_description_C1_removed$Genotype)
+rownames(annotation) <- rownames(ttseq_description_C1_removed)
+
+spearman_correlation_matrix <- cor(TTseqC1RemovedNormalized.GR[,grepl("^RNA", colnames(TTseqC1RemovedNormalized.GR))], method = "spearman")
+dist_from_spearman <- as.dist(1-spearman_correlation_matrix)
+dist_matrix <- as.matrix(dist_from_spearman)
+
+pheatmap(dist_matrix, 
+         clustering_distance_rows = dist_from_spearman,
+         clustering_distance_cols = dist_from_spearman,
+         annotation_row = annotation,
+         annotation_col = annotation,
+         col = plasma(256))
+
+```
+
+```{r}
+TTseqC1RemovedNormalized.GR$gene_name <- rownames(TTseqC1RemovedNormalized.GR)
+TTseqC1RemovedNormalizedLong.GR <- 
+  melt(TTseqC1RemovedNormalized.GR[,grepl("^RNA", colnames(TTseqC1RemovedNormalized.GR)) | colnames(TTseqC1RemovedNormalized.GR) == "gene_name"],
+  id.vars = "gene_name",
+  variable_name = "sample_name")
+colnames(TTseqC1RemovedNormalizedLong.GR)[2] <- "sample_name"
+colnames(TTseqC1RemovedNormalizedLong.GR)[3] <- "normalized_count"
+TTseqC1RemovedNormalizedLong.GR <- merge(TTseqC1RemovedNormalizedLong.GR, ttseq_description_C1_removed, by="sample_name")
+head(TTseqC1RemovedNormalizedLong.GR)
+```
+
+##### Top 10 Up Degs Bar Plot
+
+```{r}
+top10_upregTTseqC1Removed.GR <- rownames(top_upregTTC1Removed.GR[1:10,])
+for (gene in top10_upregTTseqC1Removed.GR) {
+  p <- ggplot(TTseqC1RemovedNormalizedLong.GR[TTseqC1RemovedNormalizedLong.GR$gene_name == gene, ],
+              aes(x = Genotype, y = normalized_count)) +
+    geom_boxplot(width = 0.1, alpha = 0.5, aes(fill = Genotype)) +
+    geom_jitter(aes(colour = Replicate), width = 0.2, size = 1.5) +
+    labs(title = paste("Expression of", 
+                       MusGeneNames$gene_name[MusGeneNames$gene_id == gene]),
+         y = expression("Normalized Counts"),
+         x = "Genotype") +
+    theme_classic()
+  print(p)
+}
+
+```
+
+##### Top 10 Down Degs Bar Plot
+
+```{r}
+top10_downregTTseqC1Removed.GR <- rownames(head(top_downregTTC1Removed.G, 10))
+
+for (gene in top10_downregTTseqC1Removed.GR) {
+  p <- ggplot(TTseqC1RemovedNormalizedLong.GR[TTseqC1RemovedNormalizedLong.GR$gene_name == gene, ],
+              aes(x = Genotype, y = normalized_count)) +
+    geom_boxplot(width = 0.1, alpha = 0.5, aes(fill = Genotype)) +
+    geom_jitter(aes(colour = Replicate), width = 0.2, size = 1.5) +
+    labs(title = paste("Expression of", 
+                       MusGeneNames$gene_name[MusGeneNames$gene_id == gene]),
+         y = expression("Normalized Counts"),
+         x = "Genotype") +
+    theme_classic()
+  print(p)
+}
+```
+
+## karyoploteR
+
+```{r}
+fai <- read.table("/home/franck/SCRATCH/fpan/Genome_Index/chR_index_files/cat_chR_MusDroso.fasta.fai", header = FALSE, stringsAsFactors = FALSE)
+session <- browserSession("UCSC")
+genome(session) <- "mm10"
+cyto <- track(session, "cytoBand")
+```
+
+```{r}
+colnames(fai) <- c("chr", "length", "offset", "line_bases", "line_bytes")
+fai <- fai[!grepl("^Droso_|^GL|^JH", fai$chr),]
+custom.genome <- GRanges(seqnames = fai$chr,
+                 ranges = IRanges(start = 1, end = fai$length))
+desired_order <- paste0("chr", c(1:19, "X", "Y", "M", "R"))
+seqlevels(custom.genome) <- desired_order
+custom.genome <- sort(custom.genome)
+mus_chrs <- c(paste0("chr", 1:19), "chrX", "chrY")
+filtered_gtf <- latest_gtf[seqnames(latest_gtf) %in% mus_chrs]
+gene_features <- filtered_gtf[filtered_gtf$type == "gene"]
+```
+
+```{r}
+cyto <- keepSeqlevels(cyto, mus_chrs, pruning.mode="coarse")
+kp <- plotKaryotype(plot.type=6, genome = custom.genome, cytobands = cyto, chromosomes=mus_chrs, cex=1)
+kpDataBackground(kp, color = "#FFFFFFAA")
+kpPlotDensity(kp, gene_features, window.size = 0.5e6, data.panel="ideogram", col="red", border="red", r0=0.5, r1=1)
+kpPlotDensity(kp, gene_features, window.size = 0.5e6, data.panel="ideogram", col="red", border="red", r0=0.5, r1=0)
+```
+
+```{r}
+TPM <- TTtxi_tx$abundance
+TPM <- as.data.frame(TPM)
+TPM <- TPM[grepl("^ENS|^PreMrnaENS", rownames(TPM)),]
+TPM$gene_id <- tx2gene$GENEID[match(rownames(TPM), tx2gene$TXNAME)]
+head(TPM)
+```
+
+```{r}
+transcript_density <- TPM %>%
+  group_by(gene_id) %>%
+  summarise(count = n()) %>%
+  as.data.frame()
+
+rownames(transcript_density) <- transcript_density$gene_id
+colnames(transcript_density)[2] <- "score"
+transcript_density$gene_id <- NULL
+trdf <- DataFrame(transcript_density)
+head(trdf)
+```
+
+```{r}
+TPM_gene <- TPM %>%
+  group_by(gene_id) %>%
+  summarise(across(where(is.numeric), \(x) sum(x, na.rm = TRUE)))
+TPM_gene <- as.data.frame(TPM_gene)
+rownames(TPM_gene) <- TPM_gene$gene_id
+TPM_gene <- TPM_gene[, -1]
+head(TPM_gene)
+```
+
+```{r}
+gtf_tpm <- gtf_genes[gtf_genes$gene_id %in% unique(MusGeneNames$gene_id)]
+mcols(gtf_tpm) <- mcols(gtf_tpm)[, c("gene_name","gene_id"), drop = FALSE]
+mcols(gtf_tpm) <- data.frame(log2(TPM_gene[gtf_tpm$gene_id, colnames(TPM_gene)] + 1), gtf_tpm$gene_id, gtf_tpm$gene_name)
+head(gtf_tpm)
+```
+
+```{r}
+gtf_covTr <- gtf_genes[gtf_genes$gene_id %in% unique(MusGeneNames$gene_id)]
+mcols(gtf_covTr) <- mcols(gtf_covTr)[, "gene_id", drop = FALSE]
+mcols(gtf_covTr) <- trdf[gtf_covTr$gene_id, colnames(trdf)]
+head(gtf_covTr)
+```
+
+### Compare_Chr_TTsample
+
+```{r}
+height_per_sample <- 1 / length(mus_chrs)
+for(i in seq_along(mus_chrs)){
+  nth_chr <- mus_chrs[i]
+  chr_genes <- gtf_tpm[seqnames(gtf_tpm)==nth_chr]
+  bin_size <- 1e6
+  chr_length <- width(custom.genome)[i]
+  bins <- tileGenome(seqlengths = setNames(chr_length, nth_chr),
+                     tilewidth = bin_size, 
+                     cut.last.tile.in.chrom = TRUE)
+  r <- 0
+  kp <- plotKaryotype(genome=custom.genome, chromosomes=nth_chr, cytobands=cyto, plot.type=4)
+    for(sample in grep("^RNA", colnames(mcols(chr_genes)), value = TRUE)){
+      hits <- findOverlaps(bins, chr_genes) 
+      sum_expr <- tapply(mcols(chr_genes)[[sample]][subjectHits(hits)],
+                         queryHits(hits), sum, na.rm=TRUE)
+      expr_bins <- bins[as.numeric(names(sum_expr))]
+      expr_bins$expr <- sum_expr
+      
+      #kpArea(kp, data=expr_bins, y=expr_bins$expr, ymax = max(expr_bins$expr) * 1.1, col = rgb(34/255, 139/255, 34/255, alpha = 0.6), border=NA)
+      kpLines(kp, chr=nth_chr, data = expr_bins, y=expr_bins$expr, ymin= 0, ymax = max(expr_bins$expr) * 1.1, col="forestgreen", lwd=2, r0 = r, 
+              r1 = r + height_per_sample)
+      kpPoints(kp, data=expr_bins, y=expr_bins$expr, ymin= 0, ymax = max(expr_bins$expr) * 1.1, col="blue", cex=0.5, r0 = r, r1 = r + height_per_sample)
+      kpAddLabels(kp, labels = substr(sample, nchar(sample)-1, nchar(sample)), r0 = r, r1 = r + height_per_sample, 
+            cex = 0.7, srt = 0, label.margin = 0.01)
+      
+      r <- r + height_per_sample
+  }
+}
+```
+
+### Compare_Chr_2sample
+
+```{r}
+interest <- c("RNA_S11589Nr69","RNA_S11589Nr71")
+gap_ratio <- 0.1 
+n_tracks <- length(interest)
+height_per_sample <- (1 - (n_tracks - 1) * gap_ratio) / n_tracks
+for(i in seq_along(mus_chrs)){
+  nth_chr <- mus_chrs[i]
+  chr_genes <- gtf_tpm[seqnames(gtf_tpm)==nth_chr]
+  bin_size <- 1e6
+  chr_length <- width(custom.genome)[i]
+  bins <- tileGenome(seqlengths = setNames(chr_length, nth_chr),
+                     tilewidth = bin_size, 
+                     cut.last.tile.in.chrom = TRUE)
+  r <- 0
+  kp <- plotKaryotype(genome=custom.genome, chromosomes=nth_chr, cytobands=cyto, plot.type=4)
+    for(sample in interest){
+      hits <- findOverlaps(bins, chr_genes) 
+      sum_expr <- tapply(mcols(chr_genes)[[sample]][subjectHits(hits)],
+                         queryHits(hits), sum, na.rm=TRUE)
+      expr_bins <- bins[as.numeric(names(sum_expr))]
+      expr_bins$expr <- sum_expr
+      
+      kpArea(kp, data=expr_bins, y=expr_bins$expr, ymax = max(expr_bins$expr) * 1.1, col = rgb(34/255, 139/255, 34/255, alpha = 0.6), 
+             border=NA, r0 = r, r1 = r + height_per_sample)
+      kpLines(kp, chr=nth_chr, data = expr_bins, y=expr_bins$expr, ymin= 0, ymax = max(expr_bins$expr) * 1.1, col="forestgreen", lwd=2, r0 = r, 
+              r1 = r + height_per_sample)
+      kpPoints(kp, data=expr_bins, y=expr_bins$expr, ymin= 0, ymax = max(expr_bins$expr) * 1.1, col="blue", cex=0.5, 
+               r0 = r, r1 = r + height_per_sample)
+      kpAddLabels(kp, labels = substr(sample, nchar(sample)-1, nchar(sample)), r0 = r - height_per_sample * 0.1,
+                  r1 = r , cex = 0.7, srt = 0, label.margin = 0.01, pos = 1)
+      kpAxis(kp, ymin = 0, ymax = max(expr_bins$expr) * 1.1, r0 = r, r1 = r + height_per_sample, cex = 1, numticks = 4)
+      r <- r + height_per_sample + gap_ratio
+  }
+}
+```
+
+### Compare_Chr_1max_2sample
+
+```{r}
+interest <- c("RNA_S11589Nr69","RNA_S11589Nr71")
+height_per_sample <- 1 / length(interest)
+for(i in seq_along(mus_chrs)){
+  nth_chr <- mus_chrs[i]
+  chr_genes <- gtf_tpm[seqnames(gtf_tpm)==nth_chr]
+  bin_size <- 1e6
+  chr_length <- width(custom.genome)[i]
+  bins <- tileGenome(seqlengths = setNames(chr_length, nth_chr),
+                     tilewidth = bin_size, 
+                     cut.last.tile.in.chrom = TRUE)
+  r <- 0
+  expr_list <- GRangesList()
+  kp <- plotKaryotype(genome=custom.genome, chromosomes=nth_chr, cytobands=cyto, plot.type=4)
+    for(sample in interest){
+      hits <- findOverlaps(bins, chr_genes) 
+      sum_expr <- tapply(mcols(chr_genes)[[sample]][subjectHits(hits)],
+                         queryHits(hits), sum, na.rm=TRUE)
+      expr_bins <- bins[as.numeric(names(sum_expr))]
+      expr_bins$expr <- sum_expr
+      expr_list[[sample]] <- expr_bins
+    }
+  max_y = max(expr_list[[interest[1]]]$expr, expr_list[[interest[2]]]$expr)
+  kpArea(kp, data=expr_list[[interest[1]]], y=expr_list[[interest[1]]]$expr, ymax = max_y * 1.1, col = rgb(34/255, 139/255, 34/255, alpha = 0.6), 
+         border=NA, r0 = r, r1 = r + 0.4)
+  kpLines(kp, chr=nth_chr, data = expr_list[[interest[1]]], y=expr_list[[interest[1]]]$expr, ymin= 0, ymax = max_y * 1.1, col="forestgreen", 
+          lwd=2, r0 = r, 
+          r1 = r + 0.4)
+  kpPoints(kp, data=expr_list[[interest[1]]], y=expr_list[[interest[1]]]$expr, ymin= 0, ymax = max_y * 1.1, col="blue", 
+           cex=0.5, r0 = r, r1 = r + 0.4)
+  kpAddLabels(kp, labels = substr(interest[1], nchar(interest[1])-1, nchar(interest[1])), r0 = r, 
+              r1 = r + 0.4, cex = 0.7, srt = 0, label.margin = 0.01)
+  
+  kpArea(kp, data=expr_list[[interest[2]]], y=expr_list[[interest[2]]]$expr, ymax = max_y * 1.1, col = rgb(34/255, 139/255, 34/255, alpha = 0.6), 
+       border=NA, r0 = 0.6, r1 = 1)
+  kpLines(kp, chr=nth_chr, data = expr_list[[interest[2]]], y=expr_list[[interest[2]]]$expr, ymin= 0, ymax = max_y * 1.1, col="forestgreen", 
+          lwd=2, r0 = 0.6, 
+          r1 = 1)
+  kpPoints(kp, data=expr_list[[interest[2]]], y=expr_list[[interest[2]]]$expr, ymin= 0, ymax = max_y * 1.1, col="blue", 
+           cex=0.5, r0 = 0.6, r1 = 1)
+  kpAddLabels(kp, labels = substr(interest[2], nchar(interest[2])-1, nchar(interest[2])), r0 = 0.6, 
+              r1 = 1, cex = 0.7, srt = 0, label.margin = 0.01)
+  kpAxis(kp, ymin = 0, ymax = max_y, r0 = 0, r1 = 0.4, cex = 1, numticks = 4)
+  kpAxis(kp, ymin = 0, ymax = max_y, r0 = 0.6, r1 = 1, cex = 1, numticks = 4)
+      
+}
+```
+
+### TTDegs & Gene Density
+
+```{r}
+TTdegs <- c(rownames(TTBowtieDownRegSorted), rownames(TTBowtieUpRegSorted))
+TT_genes <- gene_features[gene_features$gene_id %in% TTdegs]
+
+kpTr <- plotKaryotype(plot.type=1, genome = custom.genome, cytobands = cyto, chromosomes=mus_chrs, cex=1)
+kpTr <- kpPlotDensity(kpTr, window.size = 0.5e6, data= TT_genes, data.panel=1, col = "forestgreen", border="forestgreen")
+density_dataTr <- kpTr$latest.plot$computed.values
+
+kpGene <- plotKaryotype(plot.type=1, genome = custom.genome, cytobands = cyto, chromosomes=mus_chrs, cex=1)
+kpGene <- kpPlotDensity(kpGene, window.size = 0.5e6, data= gene_features, data.panel=2, col = "steelblue", border="steelblue")
+density_dataGene <- kpGene$latest.plot$computed.values
+
+y <- density_dataTr$density/density_dataGene$density
+y[is.nan(y)] <- NA  
+y[is.infinite(y)] <- NA  
+
+ratio_gr <- density_dataGene$windows
+mcols(ratio_gr)$score <- y
+
+KpGeTR <- plotKaryotype(plot.type=1, genome = custom.genome, cytobands = cyto, chromosomes=mus_chrs, cex=1)
+kpLines(KpGeTR, data=ratio_gr, y=y, col="darkred", lwd=1.5)
+
+```
+
+```{r}
+TTdegsC1 <- c(rownames(TTC1RemovedUpRegSorted.G), rownames(TTC1RemovedDownRegSorted.G))
+TT_genesC1 <- gene_features[gene_features$gene_id %in% TTdegsC1]
+
+kpTr <- plotKaryotype(plot.type=1, genome = custom.genome, cytobands = cyto, chromosomes=mus_chrs, cex=1)
+kpTr <- kpPlotDensity(kpTr, window.size = 0.5e6, data= TT_genesC1, data.panel=1, col = "forestgreen", border="forestgreen")
+density_dataTr <- kpTr$latest.plot$computed.values
+
+kpGene <- plotKaryotype(plot.type=1, genome = custom.genome, cytobands = cyto, chromosomes=mus_chrs, cex=1)
+kpGene <- kpPlotDensity(kpGene, window.size = 0.5e6, data= gene_features, data.panel=2, col = "steelblue", border="steelblue")
+density_dataGene <- kpGene$latest.plot$computed.values
+
+yC1 <- density_dataTr$density/density_dataGene$density
+yC1[is.nan(yC1)] <- NA  
+yC1[is.infinite(yC1)] <- NA  
+
+ratio_grC1 <- density_dataGene$windows
+mcols(ratio_grC1)$score <- yC1
+
+KpGeTRc1 <- plotKaryotype(plot.type=1, genome = custom.genome, cytobands = cyto, chromosomes=mus_chrs, cex=1)
+kpLines(KpGeTRc1, data=ratio_grC1, y=yC1, col="darkred", lwd=1.5)
+
+```
+
+```{r}
+peaksC1 <- GRanges()
+for (chr in runValue(seqnames(ratio_grC1))){
+  subset_gtf <- ratio_grC1[seqnames(ratio_grC1)==chr]
+  score_vec <- subset_gtf[!is.na(subset_gtf$score)]
+  min_value <- 0.01  
+  nonzero_scores <- score_vec[score_vec$score > min_value]
+  quantile_cutoff <- 0.90
+  threshold <- quantile(nonzero_scores$score,quantile_cutoff)
+  peaksC1 <- c(peaksC1, nonzero_scores[nonzero_scores$score > threshold & nonzero_scores$score > min_value])
+  }
+
+dummy <- ratio_grC1
+hits <- findOverlaps(dummy, peaksC1, type = "start")
+dummy$score <- 0
+dummy$score[queryHits(hits)] <- peaksC1$score[subjectHits(hits)]
+
+KpGeTRdummy <- plotKaryotype(plot.type=1, genome = custom.genome, cytobands = cyto, chromosomes=mus_chrs, cex=1)
+kpLines(KpGeTRdummy, data=dummy, y=dummy$score, col="darkgreen", lwd=1.5)
+
+peaks_genes1 <- mcols(subsetByOverlaps(TT_genesC1, peaksC1, type="within"))$gene_name
+writeLines(peaks_genes1, "/home/franck/SCRATCH/fpan/Script/Analysis_image/GENE_LIST/peaks_potential_gene.txt")
+
+peaks <- GRanges()
+for (chr in runValue(seqnames(ratio_gr))){
+  subset_gtf <- ratio_gr[seqnames(ratio_gr)==chr]
+  score_vec <- subset_gtf[!is.na(subset_gtf$score)]
+  min_value <- 0.01  
+  nonzero_scores <- score_vec[score_vec$score > min_value]
+  quantile_cutoff <- 0.90
+  threshold <- quantile(nonzero_scores$score,quantile_cutoff)
+  peaks <- c(peaks, nonzero_scores[nonzero_scores$score > threshold & nonzero_scores$score > min_value])
+  }
+
+dummy2 <- ratio_gr
+hits <- findOverlaps(dummy2, peaks, type = "start")
+dummy2$score <- 0
+dummy2$score[queryHits(hits)] <- peaks$score[subjectHits(hits)]
+
+KpGeTRdummy <- plotKaryotype(plot.type=1, genome = custom.genome, cytobands = cyto, chromosomes=mus_chrs, cex=1)
+kpLines(KpGeTRdummy, data=dummy2, y=dummy2$score, col="darkred", lwd=1.5)
+
+peaks_genes2 <- mcols(subsetByOverlaps(TT_genesC1, peaks, type="within"))$gene_name
+writeLines(peaks_genes2, "/home/franck/SCRATCH/fpan/Script/Analysis_image/GENE_LIST/peaksC1_potential_gene.txt")
+
+
+hits <- findOverlaps(peaks, peaksC1, type = "start")
+common_peaks <- peaks[queryHits(hits)]
+
+dummy3 <- ratio_gr
+hits <- findOverlaps(dummy3, common_peaks, type = "start")
+dummy3$score <- 0
+dummy3$score[queryHits(hits)] <- peaks$score[subjectHits(hits)]
+
+KpGeTRdummy <- plotKaryotype(plot.type=1, genome = custom.genome, cytobands = cyto, chromosomes=mus_chrs, cex=1)
+kpLines(KpGeTRdummy, data=dummy3, y=dummy3$score, col="steelblue", lwd=1.5)
+
+common_genes <- mcols(subsetByOverlaps(TT_genesC1, common_peaks, type="within"))$gene_name
+writeLines(common_genes, "/home/franck/SCRATCH/fpan/Script/Analysis_image/GENE_LIST/common_potential_gene.txt")
+writeLines(setdiff(peaks_genes2, common_genes), "/home/franck/SCRATCH/fpan/Script/Analysis_image/GENE_LIST/only_peaksC1_potential_gene.txt")
+writeLines(setdiff(peaks_genes1, common_genes), "/home/franck/SCRATCH/fpan/Script/Analysis_image/GENE_LIST/only_peaks_potential_gene.txt")
+
+
+```
+
+```{r}
+writeLines(MusGeneNames$gene_name[match(rownames(RnaUpRegSorted), MusGeneNames$gene_id)], "/home/franck/SCRATCH/fpan/Script/Analysis_image/GENE_LIST/RNA_STAR_UPREG.txt")
+writeLines(MusGeneNames$gene_name[match(rownames(RnaDownRegSorted), MusGeneNames$gene_id)], "/home/franck/SCRATCH/fpan/Script/Analysis_image/GENE_LIST/RNA_STAR_DOWNREG.txt")
+
+writeLines(MusGeneNames$gene_name[match(rownames(TxiUpRegSorted), MusGeneNames$gene_id)], "/home/franck/SCRATCH/fpan/Script/Analysis_image/GENE_LIST/RNA_SALMON_GENE_PREMRNA_UPREG.txt")
+writeLines(MusGeneNames$gene_name[match(rownames(TxiDownRegSorted), MusGeneNames$gene_id)], "/home/franck/SCRATCH/fpan/Script/Analysis_image/GENE_LIST/RNA_SALMON_GENE_PREMRNA_DOWNREG.txt")
+
+writeLines(MusGeneNames$gene_name[match(rownames(TxiTTUpRegSorted), MusGeneNames$gene_id)], "/home/franck/SCRATCH/fpan/Script/Analysis_image/GENE_LIST/RNA_SALMON_PREMRNA_UPREG.txt")
+writeLines(MusGeneNames$gene_name[match(rownames(TxiTTDownRegSorted), MusGeneNames$gene_id)], "/home/franck/SCRATCH/fpan/Script/Analysis_image/GENE_LIST/RNA_SALMON_PREMRNA_DOWNREG.txt")
+
+writeLines(MusGeneNames$gene_name[match(rownames(TxiTTUpRegSortedC1), MusGeneNames$gene_id)], "/home/franck/SCRATCH/fpan/Script/Analysis_image/GENE_LIST/RNA_SALMON_PREMRNA_C1REMOVED_UPREG.txt")
+writeLines(MusGeneNames$gene_name[match(rownames(TxiTTDownRegSortedC1), MusGeneNames$gene_id)], "/home/franck/SCRATCH/fpan/Script/Analysis_image/GENE_LIST/RNA_SALMON_PREMRNA_C1REMOVED_DOWNREG.txt")
+
+writeLines(MusGeneNames$gene_name[match(rownames(RnaUpRegSortedC1), MusGeneNames$gene_id)], "/home/franck/SCRATCH/fpan/Script/Analysis_image/GENE_LIST/RNA_STAR_C1REMOVED_UPREG.txt")
+writeLines(MusGeneNames$gene_name[match(rownames(RnaDownRegSortedC1), MusGeneNames$gene_id)], "/home/franck/SCRATCH/fpan/Script/Analysis_image/GENE_LIST/RNA_STAR_C1REMOVED_DOWNREG.txt")
+
+writeLines(MusGeneNames$gene_name[match(rownames(TTUpRegSorted), MusGeneNames$gene_id)], "/home/franck/SCRATCH/fpan/Script/Analysis_image/GENE_LIST/TT_STAR_UPREG.txt")
+writeLines(MusGeneNames$gene_name[match(rownames(TTDownRegSorted), MusGeneNames$gene_id)], "/home/franck/SCRATCH/fpan/Script/Analysis_image/GENE_LIST/TT_STAR_DOWNREG.txt")
+
+writeLines(MusGeneNames$gene_name[match(rownames(TTBowtieUpRegSorted), MusGeneNames$gene_id)], "/home/franck/SCRATCH/fpan/Script/Analysis_image/GENE_LIST/TT_BOWTIE2_UPREG.txt")
+writeLines(MusGeneNames$gene_name[match(rownames(TTBowtieDownRegSorted), MusGeneNames$gene_id)], "/home/franck/SCRATCH/fpan/Script/Analysis_image/GENE_LIST/TT_BOWTIE2_DOWNREG.txt")
+
+writeLines(MusGeneNames$gene_name[match(rownames(TTC1RemovedUpRegSorted.G), MusGeneNames$gene_id)], "/home/franck/SCRATCH/fpan/Script/Analysis_image/GENE_LIST/TT_BOWTIE2_C1REMOVED_GENOTYPE_UPREG.txt")
+writeLines(MusGeneNames$gene_name[match(rownames(TTC1RemovedDownRegSorted.G), MusGeneNames$gene_id)], "/home/franck/SCRATCH/fpan/Script/Analysis_image/GENE_LIST/TT_BOWTIE2_C1REMOVED_GENOTYPE_DOWNREG.txt")
+
+writeLines(MusGeneNames$gene_name[match(rownames(TTC1RemovedUpRegSorted.GR), MusGeneNames$gene_id)], "/home/franck/SCRATCH/fpan/Script/Analysis_image/GENE_LIST/TT_BOWTIE2_C1REMOVED_GENOTYPE_REPLICATE_UPREG.txt")
+writeLines(MusGeneNames$gene_name[match(rownames(TTC1RemovedDownRegSorted.GR), MusGeneNames$gene_id)], "/home/franck/SCRATCH/fpan/Script/Analysis_image/GENE_LIST/TT_BOWTIE2_C1REMOVED_GENOTYPE_REPLICATE_DOWNREG.txt")
+```
+
+```{r}
+cyto12 <- cyto[seqnames(cyto)=="chr12"]
+chr12_gene_name <- mcols(subsetByOverlaps(TT_genes, cyto12[length(cyto12)-1], type = "within"))$gene_name
+writeLines(chr12_gene_name, "/home/franck/SCRATCH/fpan/Script/Analysis_image/GENE_LIST/chr12_TT_Bowtie_potential_gene.txt")
+```
+
+## limma
+
+```{r}
+all_mus_genes <- unique(MusGeneNames$gene_id)
+
+rnaC1_vs_ttC1_up <- cbind(
+  RNA = all_mus_genes %in% rownames(RnaUpRegSortedC1),
+  TT = all_mus_genes %in% rownames(TTC1RemovedUpRegSorted.G)
+)
+rownames(rnaC1_vs_ttC1_up) <- all_mus_genes
+
+rnaC1_vs_ttC1_down <- cbind(
+  RNA = all_mus_genes %in% rownames(RnaDownRegSortedC1),
+  TT = all_mus_genes %in% rownames(TTC1RemovedDownRegSorted.G)
+)
+rownames(rnaC1_vs_ttC1_down) <- all_mus_genes
+
+rna_only <- c(rownames(rnaC1_vs_ttC1_up[rnaC1_vs_ttC1_up[,1] & !rnaC1_vs_ttC1_up[,2],]),
+              rownames(rnaC1_vs_ttC1_down[rnaC1_vs_ttC1_down[,1] & !rnaC1_vs_ttC1_down[,2],]))
+
+tt_only <- c(rownames(rnaC1_vs_ttC1_up[!rnaC1_vs_ttC1_up[,1] & rnaC1_vs_ttC1_up[,2],]),
+              rownames(rnaC1_vs_ttC1_down[!rnaC1_vs_ttC1_down[,1] & rnaC1_vs_ttC1_down[,2],]))
+
+both_present <- c(rownames(rnaC1_vs_ttC1_up[rnaC1_vs_ttC1_up[,1] & rnaC1_vs_ttC1_up[,2],]),
+              rownames(rnaC1_vs_ttC1_down[rnaC1_vs_ttC1_down[,1] & rnaC1_vs_ttC1_down[,2],]))
+```
+
+```{r}
+vc_up <- vennCounts(rnaC1_vs_ttC1_up)
+print(vc_up)
+```
+
+```{r}
+vc_down <- vennCounts(rnaC1_vs_ttC1_down)
+print(vc_down)
+```
+
+```{r}
+vennDiagram(vc_up)
+vennDiagram(vc_down)
+```
+
+### Fold2Change RNA vs TT Plot
+
+```{r}
+RnaTTmergedF2change <- merge(data.frame(RnaResNoNa), data.frame(TTResNoNa), by="index", suffixes=c("RNA", "TT"))
+RnaTTmergedF2change$Presence <- "None"
+RnaTTmergedF2change[RnaTTmergedF2change$index %in% rna_only,]$Presence <- "RNA"
+RnaTTmergedF2change[RnaTTmergedF2change$index %in% tt_only,]$Presence <- "TT"
+RnaTTmergedF2change[RnaTTmergedF2change$index %in% both_present,]$Presence <- "Both"
+RnaTTmergedF2change$Presence <- factor(RnaTTmergedF2change$Presence, levels = c("None", "RNA", "TT", "Both"))
+RnaTTmergedF2change <- RnaTTmergedF2change[order(RnaTTmergedF2change$Presence),]
+
+ggplot(RnaTTmergedF2change, aes(x = log2FoldChangeRNA, y = log2FoldChangeTT, col = Presence)) +
+  geom_point(size = 1) +
+  geom_hline(yintercept = 0, col = "darkgrey", linetype = 'dashed', linewidth = 1) +
+  geom_vline(xintercept = 0, col = "darkgrey", linetype = 'dashed', linewidth = 1) +
+  scale_color_manual(values = c("black", "steelblue", "darkgreen", "darkred"),
+                     labels = c("None", "RNA", "TT", "Both")) +
+  theme_classic() 
+```
