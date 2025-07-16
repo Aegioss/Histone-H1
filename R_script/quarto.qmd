@@ -1683,7 +1683,7 @@ for (gene in top10_downregTTseqC1Removed.G) {
 ttseq_dds_c1_removed.GR <- DESeqDataSetFromMatrix(countData = bowtie_ttseq_C1_removed,
                                     colData = ttseq_description_C1_removed,
                                     design = ~ Replicate + Genotype)
-ttseq_dds_c1_removed.GR <- estimateSizeFactors(ttseq_dds_c1_removed.GR, controlGenes = grepl("Droso_", rownames(bowtie_ttseq_C1_removed)))
+#ttseq_dds_c1_removed.GR <- estimateSizeFactors(ttseq_dds_c1_removed.GR, controlGenes = grepl("Droso_", rownames(bowtie_ttseq_C1_removed)))
 ttseq_dds_c1_removed.GR <- DESeq(ttseq_dds_c1_removed.GR[grepl("^ENS", rownames(bowtie_ttseq_C1_removed))])
 
 TtResC1Removed.GR <- results(ttseq_dds_c1_removed.GR, name="Genotype_WT_vs_LOW", contrast=c("Genotype","LOW","WT"))
@@ -1711,8 +1711,8 @@ ggplot(TtResNoNaC1Removed.GR, aes(x =TtResNoNaC1Removed.GR$baseMean,
   geom_hline(yintercept = 0, col = "black", linetype = 'dashed', linewidth = 1) +
   theme_classic() +
   scale_color_manual(values = c("darkgrey", "blue"),
-                     labels = c("Not Significant", "Significant"))
-  #geom_density2d(col="red")
+                     labels = c("Not Significant", "Significant"))+
+  geom_density2d(col="red")
 ```
 
 ##### QQ Plot
