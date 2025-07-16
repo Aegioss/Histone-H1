@@ -1683,7 +1683,7 @@ for (gene in top10_downregTTseqC1Removed.G) {
 ttseq_dds_c1_removed.GR <- DESeqDataSetFromMatrix(countData = bowtie_ttseq_C1_removed,
                                     colData = ttseq_description_C1_removed,
                                     design = ~ Replicate + Genotype)
-#ttseq_dds_c1_removed.GR <- estimateSizeFactors(ttseq_dds_c1_removed.GR, controlGenes = grepl("Droso_", rownames(bowtie_ttseq_C1_removed)))
+ttseq_dds_c1_removed.GR <- estimateSizeFactors(ttseq_dds_c1_removed.GR, controlGenes = grepl("Droso_", rownames(bowtie_ttseq_C1_removed)))
 ttseq_dds_c1_removed.GR <- DESeq(ttseq_dds_c1_removed.GR[grepl("^ENS", rownames(bowtie_ttseq_C1_removed))])
 
 TtResC1Removed.GR <- results(ttseq_dds_c1_removed.GR, name="Genotype_WT_vs_LOW", contrast=c("Genotype","LOW","WT"))
@@ -1702,7 +1702,7 @@ ggplot(TtResNoNaC1Removed.GR, aes(x =TtResNoNaC1Removed.GR$baseMean,
                        y = TtResNoNaC1Removed.GR$log2FoldChange, 
                        col = significant)) +
   geom_point(size = 1) +
-  coord_cartesian(ylim = c(-2, 2)) +
+  coord_cartesian(ylim = c(-5, 5)) +
   labs( title = "MA Plot from Bowtie2 TT-seq C1 Removed - Genotype + Replicate",
         color = 'Category',
         x = expression("BaseMean Of Normalized Counts"), 
