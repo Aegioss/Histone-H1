@@ -1,4 +1,0 @@
-"0","TTdegsC1 <- c(rownames(TTC1RemovedUpRegSorted.G), rownames(TTC1RemovedDownRegSorted.G))"
-"0","TT_genesC1 <- gene_features[gene_features$gene_id %in% TTdegsC1]"
-"0",""
-"0","kpTr <- plotKaryotype(plot.type=1, genome = custom.genome, cytobands = cyto, chromosomes=mus_chrs, cex=1)"

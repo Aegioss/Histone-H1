@@ -1,7 +1,0 @@
-"0",""
-"0","common_genes <- mcols(subsetByOverlaps(TT_genesC1, common_peaks, type=""within""))$gene_name"
-"0","writeLines(common_genes, ""/home/franck/SCRATCH/fpan/Script/Analysis_image/GENE_LIST/common_potential_gene.txt"")"
-"0","writeLines(setdiff(peaks_genes2, common_genes), ""/home/franck/SCRATCH/fpan/Script/Analysis_image/GENE_LIST/only_peaksC1_potential_gene.txt"")"
-"0","writeLines(setdiff(peaks_genes1, common_genes), ""/home/franck/SCRATCH/fpan/Script/Analysis_image/GENE_LIST/only_peaks_potential_gene.txt"")"
-"0",""
-"0",""

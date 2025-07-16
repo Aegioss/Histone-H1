@@ -1,3 +1,0 @@
-"0","density_dataTr <- kpTr$latest.plot$computed.values"
-"0",""
-"0","kpGene <- plotKaryotype(plot.type=1, genome = custom.genome, cytobands = cyto, chromosomes=mus_chrs, cex=1)"

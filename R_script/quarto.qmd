@@ -222,8 +222,8 @@ ggplot(RnaResNoNa, aes(x =RnaResNoNa$baseMean,
                        y = RnaResNoNa$log2FoldChange, 
                        col = significant)) +
   geom_point(size = 1) +
-  #coord_cartesian(ylim = c(-5, 5)) +
-  labs( title = "MA Plot from RNA-seq",
+  coord_cartesian(ylim = c(-5, 5)) +
+  labs( title = "MA Plot from STAR RNA-seq",
         color = 'Category',
         x = expression("BaseMean Of Normalized Counts"), 
         y = expression("Log"[2]*" Fold Change")) + 
@@ -238,7 +238,7 @@ ggplot(TxiResNoNa, aes(x =TxiResNoNa$baseMean,
                        y = TxiResNoNa$log2FoldChange, 
                        col = significant)) +
   geom_point(size = 1) +
-  #coord_cartesian(ylim = c(-5, 5)) +
+  coord_cartesian(ylim = c(-5, 5)) +
   labs( title = "MA Plot from Salmon RNA-seq",
         color = 'Category',
         x = expression("BaseMean Of Normalized Counts"), 
@@ -254,7 +254,7 @@ ggplot(TxiTTResNoNa, aes(x =TxiTTResNoNa$baseMean,
                        y = TxiTTResNoNa$log2FoldChange, 
                        col = significant)) +
   geom_point(size = 1) +
-  #coord_cartesian(ylim = c(-5, 5)) +
+  coord_cartesian(ylim = c(-5, 5)) +
   labs( title = "MA Plot from Salmon RNA-seq Only PreMrna",
         color = 'Category',
         x = expression("BaseMean Of Normalized Counts"), 
@@ -271,7 +271,7 @@ ggplot(TTResNoNa, aes(x =TTResNoNa$baseMean,
                        y = TTResNoNa$log2FoldChange, 
                        col = significant)) +
   geom_point(size = 1) +
-  #coord_cartesian(ylim = c(-5, 5)) +
+  coord_cartesian(ylim = c(-5, 5)) +
   labs( title = "MA Plot from STAR TT-seq",
         color = 'Category',
         x = expression("BaseMean Of Normalized Counts"), 
@@ -290,7 +290,7 @@ ggplot(TTResBowtieNoNa, aes(x =TTResBowtieNoNa$baseMean,
   #geom_point(data=TTResBowtieNoNa["ENSMUSG00000069049.11",], shape=23, color="darkgreen", size=5, aes(x = baseMean, 
                        #y = log2FoldChange, 
                        #col = significant)) +
-  #coord_cartesian(ylim = c(-5, 5)) +
+  coord_cartesian(ylim = c(-5, 5)) +
   labs( title = "MA Plot from Bowtie2 TT-seq",
         color = 'Category',
         x = expression("BaseMean Of Normalized Counts"), 
@@ -928,7 +928,7 @@ ggplot(TxiResNoNaC1Removed, aes(x =TxiResNoNaC1Removed$baseMean,
                        y = TxiResNoNaC1Removed$log2FoldChange, 
                        col = significant)) +
   geom_point(size = 1) +
-  #coord_cartesian(ylim = c(-5, 5)) +
+  coord_cartesian(ylim = c(-5, 5)) +
   labs( title = "MA Plot from Salmon RNA-seq C1 Removed",
         color = 'Category',
         x = expression("BaseMean Of Normalized Counts"), 
@@ -1032,7 +1032,7 @@ ggplot(RnaResNoNaC1Removed, aes(x =RnaResNoNaC1Removed$baseMean,
                        y = RnaResNoNaC1Removed$log2FoldChange, 
                        col = significant)) +
   geom_point(size = 1) +
-  #coord_cartesian(ylim = c(-5, 5)) +
+  coord_cartesian(ylim = c(-5, 5)) +
   labs( title = "MA Plot from Star RNA-seq C1 Removed",
         color = 'Category',
         x = expression("BaseMean Of Normalized Counts"), 
@@ -1485,7 +1485,7 @@ ggplot(TtResNoNaC1Removed.G, aes(x =TtResNoNaC1Removed.G$baseMean,
                        y = TtResNoNaC1Removed.G$log2FoldChange, 
                        col = significant)) +
   geom_point(size = 1) +
-  #coord_cartesian(ylim = c(-5, 5)) +
+  coord_cartesian(ylim = c(-5, 5)) +
   labs( title = "MA Plot from Bowtie2 TT-seq C1 Removed",
         color = 'Category',
         x = expression("BaseMean Of Normalized Counts"), 
@@ -1702,7 +1702,7 @@ ggplot(TtResNoNaC1Removed.GR, aes(x =TtResNoNaC1Removed.GR$baseMean,
                        y = TtResNoNaC1Removed.GR$log2FoldChange, 
                        col = significant)) +
   geom_point(size = 1) +
-  #coord_cartesian(ylim = c(-5, 5)) +
+  coord_cartesian(ylim = c(-2, 2)) +
   labs( title = "MA Plot from Bowtie2 TT-seq C1 Removed - Genotype + Replicate",
         color = 'Category',
         x = expression("BaseMean Of Normalized Counts"), 
@@ -1711,8 +1711,8 @@ ggplot(TtResNoNaC1Removed.GR, aes(x =TtResNoNaC1Removed.GR$baseMean,
   geom_hline(yintercept = 0, col = "black", linetype = 'dashed', linewidth = 1) +
   theme_classic() +
   scale_color_manual(values = c("darkgrey", "blue"),
-                     labels = c("Not Significant", "Significant"))+
-  geom_density2d(col="red")
+                     labels = c("Not Significant", "Significant"))
+  #geom_density2d(col="red")
 ```
 
 ##### QQ Plot
@@ -2161,7 +2161,7 @@ KpGeTRdummy <- plotKaryotype(plot.type=1, genome = custom.genome, cytobands = cy
 kpLines(KpGeTRdummy, data=dummy, y=dummy$score, col="darkgreen", lwd=1.5)
 
 peaks_genes1 <- mcols(subsetByOverlaps(TT_genesC1, peaksC1, type="within"))$gene_name
-writeLines(peaks_genes1, "/home/franck/SCRATCH/fpan/Script/Analysis_image/GENE_LIST/peaks_potential_gene.txt")
+writeLines(peaks_genes1, "/home/franck/SCRATCH/fpan/Data/Analysis/GENE_LIST/peaks_potential_gene.txt")
 
 peaks <- GRanges()
 for (chr in runValue(seqnames(ratio_gr))){
@@ -2183,7 +2183,7 @@ KpGeTRdummy <- plotKaryotype(plot.type=1, genome = custom.genome, cytobands = cy
 kpLines(KpGeTRdummy, data=dummy2, y=dummy2$score, col="darkred", lwd=1.5)
 
 peaks_genes2 <- mcols(subsetByOverlaps(TT_genesC1, peaks, type="within"))$gene_name
-writeLines(peaks_genes2, "/home/franck/SCRATCH/fpan/Script/Analysis_image/GENE_LIST/peaksC1_potential_gene.txt")
+writeLines(peaks_genes2, "/home/franck/SCRATCH/fpan/Data/Analysis/GENE_LIST/peaksC1_potential_gene.txt")
 
 
 hits <- findOverlaps(peaks, peaksC1, type = "start")
@@ -2198,46 +2198,46 @@ KpGeTRdummy <- plotKaryotype(plot.type=1, genome = custom.genome, cytobands = cy
 kpLines(KpGeTRdummy, data=dummy3, y=dummy3$score, col="steelblue", lwd=1.5)
 
 common_genes <- mcols(subsetByOverlaps(TT_genesC1, common_peaks, type="within"))$gene_name
-writeLines(common_genes, "/home/franck/SCRATCH/fpan/Script/Analysis_image/GENE_LIST/common_potential_gene.txt")
-writeLines(setdiff(peaks_genes2, common_genes), "/home/franck/SCRATCH/fpan/Script/Analysis_image/GENE_LIST/only_peaksC1_potential_gene.txt")
-writeLines(setdiff(peaks_genes1, common_genes), "/home/franck/SCRATCH/fpan/Script/Analysis_image/GENE_LIST/only_peaks_potential_gene.txt")
+writeLines(common_genes, "/home/franck/SCRATCH/fpan/Data/Analysis/GENE_LIST/common_potential_gene.txt")
+writeLines(setdiff(peaks_genes2, common_genes), "/home/franck/SCRATCH/fpan/Data/Analysis/GENE_LIST/only_peaksC1_potential_gene.txt")
+writeLines(setdiff(peaks_genes1, common_genes), "/home/franck/SCRATCH/fpan/Data/Analysis/GENE_LIST/only_peaks_potential_gene.txt")
 
 
 ```
 
 ```{r}
-writeLines(MusGeneNames$gene_name[match(rownames(RnaUpRegSorted), MusGeneNames$gene_id)], "/home/franck/SCRATCH/fpan/Script/Analysis_image/GENE_LIST/RNA_STAR_UPREG.txt")
-writeLines(MusGeneNames$gene_name[match(rownames(RnaDownRegSorted), MusGeneNames$gene_id)], "/home/franck/SCRATCH/fpan/Script/Analysis_image/GENE_LIST/RNA_STAR_DOWNREG.txt")
+writeLines(MusGeneNames$gene_name[match(rownames(RnaUpRegSorted), MusGeneNames$gene_id)], "/home/franck/SCRATCH/fpan/Data/Analysis/GENE_LIST/RNA_STAR_UPREG.txt")
+writeLines(MusGeneNames$gene_name[match(rownames(RnaDownRegSorted), MusGeneNames$gene_id)], "/home/franck/SCRATCH/fpan/Data/Analysis/GENE_LIST/RNA_STAR_DOWNREG.txt")
 
-writeLines(MusGeneNames$gene_name[match(rownames(TxiUpRegSorted), MusGeneNames$gene_id)], "/home/franck/SCRATCH/fpan/Script/Analysis_image/GENE_LIST/RNA_SALMON_GENE_PREMRNA_UPREG.txt")
-writeLines(MusGeneNames$gene_name[match(rownames(TxiDownRegSorted), MusGeneNames$gene_id)], "/home/franck/SCRATCH/fpan/Script/Analysis_image/GENE_LIST/RNA_SALMON_GENE_PREMRNA_DOWNREG.txt")
+writeLines(MusGeneNames$gene_name[match(rownames(TxiUpRegSorted), MusGeneNames$gene_id)], "/home/franck/SCRATCH/fpan/Data/Analysis/GENE_LIST/RNA_SALMON_GENE_PREMRNA_UPREG.txt")
+writeLines(MusGeneNames$gene_name[match(rownames(TxiDownRegSorted), MusGeneNames$gene_id)], "/home/franck/SCRATCH/fpan/Data/Analysis/GENE_LIST/RNA_SALMON_GENE_PREMRNA_DOWNREG.txt")
 
-writeLines(MusGeneNames$gene_name[match(rownames(TxiTTUpRegSorted), MusGeneNames$gene_id)], "/home/franck/SCRATCH/fpan/Script/Analysis_image/GENE_LIST/RNA_SALMON_PREMRNA_UPREG.txt")
-writeLines(MusGeneNames$gene_name[match(rownames(TxiTTDownRegSorted), MusGeneNames$gene_id)], "/home/franck/SCRATCH/fpan/Script/Analysis_image/GENE_LIST/RNA_SALMON_PREMRNA_DOWNREG.txt")
+writeLines(MusGeneNames$gene_name[match(rownames(TxiTTUpRegSorted), MusGeneNames$gene_id)], "/home/franck/SCRATCH/fpan/Data/Analysis/GENE_LIST/RNA_SALMON_PREMRNA_UPREG.txt")
+writeLines(MusGeneNames$gene_name[match(rownames(TxiTTDownRegSorted), MusGeneNames$gene_id)], "/home/franck/SCRATCH/fpan/Data/Analysis/GENE_LIST/RNA_SALMON_PREMRNA_DOWNREG.txt")
 
-writeLines(MusGeneNames$gene_name[match(rownames(TxiTTUpRegSortedC1), MusGeneNames$gene_id)], "/home/franck/SCRATCH/fpan/Script/Analysis_image/GENE_LIST/RNA_SALMON_PREMRNA_C1REMOVED_UPREG.txt")
-writeLines(MusGeneNames$gene_name[match(rownames(TxiTTDownRegSortedC1), MusGeneNames$gene_id)], "/home/franck/SCRATCH/fpan/Script/Analysis_image/GENE_LIST/RNA_SALMON_PREMRNA_C1REMOVED_DOWNREG.txt")
+writeLines(MusGeneNames$gene_name[match(rownames(TxiTTUpRegSortedC1), MusGeneNames$gene_id)], "/home/franck/SCRATCH/fpan/Data/Analysis/GENE_LIST/RNA_SALMON_PREMRNA_C1REMOVED_UPREG.txt")
+writeLines(MusGeneNames$gene_name[match(rownames(TxiTTDownRegSortedC1), MusGeneNames$gene_id)], "/home/franck/SCRATCH/fpan/Data/Analysis/GENE_LIST/RNA_SALMON_PREMRNA_C1REMOVED_DOWNREG.txt")
 
-writeLines(MusGeneNames$gene_name[match(rownames(RnaUpRegSortedC1), MusGeneNames$gene_id)], "/home/franck/SCRATCH/fpan/Script/Analysis_image/GENE_LIST/RNA_STAR_C1REMOVED_UPREG.txt")
-writeLines(MusGeneNames$gene_name[match(rownames(RnaDownRegSortedC1), MusGeneNames$gene_id)], "/home/franck/SCRATCH/fpan/Script/Analysis_image/GENE_LIST/RNA_STAR_C1REMOVED_DOWNREG.txt")
+writeLines(MusGeneNames$gene_name[match(rownames(RnaUpRegSortedC1), MusGeneNames$gene_id)], "/home/franck/SCRATCH/fpan/Data/Analysis/GENE_LIST/RNA_STAR_C1REMOVED_UPREG.txt")
+writeLines(MusGeneNames$gene_name[match(rownames(RnaDownRegSortedC1), MusGeneNames$gene_id)], "/home/franck/SCRATCH/fpan/Data/Analysis/GENE_LIST/RNA_STAR_C1REMOVED_DOWNREG.txt")
 
-writeLines(MusGeneNames$gene_name[match(rownames(TTUpRegSorted), MusGeneNames$gene_id)], "/home/franck/SCRATCH/fpan/Script/Analysis_image/GENE_LIST/TT_STAR_UPREG.txt")
-writeLines(MusGeneNames$gene_name[match(rownames(TTDownRegSorted), MusGeneNames$gene_id)], "/home/franck/SCRATCH/fpan/Script/Analysis_image/GENE_LIST/TT_STAR_DOWNREG.txt")
+writeLines(MusGeneNames$gene_name[match(rownames(TTUpRegSorted), MusGeneNames$gene_id)], "/home/franck/SCRATCH/fpan/Data/Analysis/GENE_LIST/TT_STAR_UPREG.txt")
+writeLines(MusGeneNames$gene_name[match(rownames(TTDownRegSorted), MusGeneNames$gene_id)], "/home/franck/SCRATCH/fpan/Data/Analysis/GENE_LIST/TT_STAR_DOWNREG.txt")
 
-writeLines(MusGeneNames$gene_name[match(rownames(TTBowtieUpRegSorted), MusGeneNames$gene_id)], "/home/franck/SCRATCH/fpan/Script/Analysis_image/GENE_LIST/TT_BOWTIE2_UPREG.txt")
-writeLines(MusGeneNames$gene_name[match(rownames(TTBowtieDownRegSorted), MusGeneNames$gene_id)], "/home/franck/SCRATCH/fpan/Script/Analysis_image/GENE_LIST/TT_BOWTIE2_DOWNREG.txt")
+writeLines(MusGeneNames$gene_name[match(rownames(TTBowtieUpRegSorted), MusGeneNames$gene_id)], "/home/franck/SCRATCH/fpan/Data/Analysis/GENE_LIST/TT_BOWTIE2_UPREG.txt")
+writeLines(MusGeneNames$gene_name[match(rownames(TTBowtieDownRegSorted), MusGeneNames$gene_id)], "/home/franck/SCRATCH/fpan/Data/Analysis/GENE_LIST/TT_BOWTIE2_DOWNREG.txt")
 
-writeLines(MusGeneNames$gene_name[match(rownames(TTC1RemovedUpRegSorted.G), MusGeneNames$gene_id)], "/home/franck/SCRATCH/fpan/Script/Analysis_image/GENE_LIST/TT_BOWTIE2_C1REMOVED_GENOTYPE_UPREG.txt")
-writeLines(MusGeneNames$gene_name[match(rownames(TTC1RemovedDownRegSorted.G), MusGeneNames$gene_id)], "/home/franck/SCRATCH/fpan/Script/Analysis_image/GENE_LIST/TT_BOWTIE2_C1REMOVED_GENOTYPE_DOWNREG.txt")
+writeLines(MusGeneNames$gene_name[match(rownames(TTC1RemovedUpRegSorted.G), MusGeneNames$gene_id)], "/home/franck/SCRATCH/fpan/Data/Analysis/GENE_LIST/TT_BOWTIE2_C1REMOVED_GENOTYPE_UPREG.txt")
+writeLines(MusGeneNames$gene_name[match(rownames(TTC1RemovedDownRegSorted.G), MusGeneNames$gene_id)], "/home/franck/SCRATCH/fpan/Data/Analysis/GENE_LIST/TT_BOWTIE2_C1REMOVED_GENOTYPE_DOWNREG.txt")
 
-writeLines(MusGeneNames$gene_name[match(rownames(TTC1RemovedUpRegSorted.GR), MusGeneNames$gene_id)], "/home/franck/SCRATCH/fpan/Script/Analysis_image/GENE_LIST/TT_BOWTIE2_C1REMOVED_GENOTYPE_REPLICATE_UPREG.txt")
-writeLines(MusGeneNames$gene_name[match(rownames(TTC1RemovedDownRegSorted.GR), MusGeneNames$gene_id)], "/home/franck/SCRATCH/fpan/Script/Analysis_image/GENE_LIST/TT_BOWTIE2_C1REMOVED_GENOTYPE_REPLICATE_DOWNREG.txt")
+writeLines(MusGeneNames$gene_name[match(rownames(TTC1RemovedUpRegSorted.GR), MusGeneNames$gene_id)], "/home/franck/SCRATCH/fpan/Data/Analysis/GENE_LIST/TT_BOWTIE2_C1REMOVED_GENOTYPE_REPLICATE_UPREG.txt")
+writeLines(MusGeneNames$gene_name[match(rownames(TTC1RemovedDownRegSorted.GR), MusGeneNames$gene_id)], "/home/franck/SCRATCH/fpan/Data/Analysis/GENE_LIST/TT_BOWTIE2_C1REMOVED_GENOTYPE_REPLICATE_DOWNREG.txt")
 ```
 
 ```{r}
 cyto12 <- cyto[seqnames(cyto)=="chr12"]
 chr12_gene_name <- mcols(subsetByOverlaps(TT_genes, cyto12[length(cyto12)-1], type = "within"))$gene_name
-writeLines(chr12_gene_name, "/home/franck/SCRATCH/fpan/Script/Analysis_image/GENE_LIST/chr12_TT_Bowtie_potential_gene.txt")
+writeLines(chr12_gene_name, "/home/franck/SCRATCH/fpan/Data/Analysis/GENE_LIST/chr12_TT_Bowtie_potential_gene.txt")
 ```
 
 ## limma

@@ -1,5 +1,0 @@
-"0","bowtie_matrix <- read.csv(""/home/franck/SCRATCH/fpan/Genome_Index/chR_index_files/BowtieQ30_counts_matrix.csv"", header = TRUE, sep = "","")"
-"0","star_matrix <- read.csv(""/home/franck/SCRATCH/fpan/Genome_Index/chR_index_files/STARQ30_counts_matrix.csv"", header = TRUE, sep = "","")"
-"0","description_file <- read.csv(""/home/franck/SCRATCH/fpan/Genome_Index/chR_index_files/Ashish.SampleDescription.csv"", header = TRUE, sep = "","")"
-"0","gtf_file <- import(""/home/franck/SCRATCH/fpan/Genome_Index/chR_index_files/chR_TrExAdded.gtf"")"
-"0","latest_gtf <- import(""/home/franck/SCRATCH/fpan/Genome_Index/chR_index_files/rsem_9_06_25_filtered.gtf"")"

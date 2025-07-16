@@ -1,4 +1,0 @@
-"0","fai <- read.table(""/home/franck/SCRATCH/fpan/Genome_Index/chR_index_files/cat_chR_MusDroso.fasta.fai"", header = FALSE, stringsAsFactors = FALSE)"
-"0","session <- browserSession(""UCSC"")"
-"0","genome(session) <- ""mm10"""
-"0","cyto <- track(session, ""cytoBand"")"

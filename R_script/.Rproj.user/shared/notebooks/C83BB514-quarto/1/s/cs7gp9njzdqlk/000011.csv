@@ -1,7 +1,0 @@
-"0","TPM_gene <- TPM %>%"
-"0","  group_by(gene_id) %>%"
-"0","  summarise(across(where(is.numeric), \(x) sum(x, na.rm = TRUE)))"
-"0","TPM_gene <- as.data.frame(TPM_gene)"
-"0","rownames(TPM_gene) <- TPM_gene$gene_id"
-"0","TPM_gene <- TPM_gene[, -1]"
-"0","head(TPM_gene)"

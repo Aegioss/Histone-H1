@@ -1,4 +1,0 @@
-"0","top10_downregTxiTT <- rownames(top_downregTxiTT[1:10,])"
-"2","G1;H1;Errorh in h(simpleError(msg, call)) : 
-  error in evaluating the argument 'x' in selecting a method for function 'rownames': subscript contains out-of-bounds indices
-g"

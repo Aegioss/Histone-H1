@@ -1,5 +1,0 @@
-"0","TPM <- TTtxi_tx$abundance"
-"0","TPM <- as.data.frame(TPM)"
-"0","TPM <- TPM[grepl(""^ENS|^PreMrnaENS"", rownames(TPM)),]"
-"0","TPM$gene_id <- tx2gene$GENEID[match(rownames(TPM), tx2gene$TXNAME)]"
-"0","head(TPM)"
