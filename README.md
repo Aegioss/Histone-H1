@@ -4,7 +4,7 @@ Ce dépôt contient tous les scripts et résultats issus de l’étude sur le r�
 
 Pour garantir la reproductibilité :
 - Utilisez le fichier `r44_env.yml` pour créer l’environnement **Conda** utilisé lors de l’analyse avec **R version 4.4**. 
-- En activant l'environnement conda, lancer Rstudio pour être sous R v4.4 et utilisé `renv::restore()` .
+- En activant l'environnement conda, lancer Rstudio dans le terminal pour être sous R v4.4 et utilisé `renv::restore()` .
 
 ## Structure des dossiers
 
