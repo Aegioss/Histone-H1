@@ -8,6 +8,7 @@
 ~%2FSCRATCH%2Ffpan%2FData%2FR_script%2FDESeq_Analysis.R="2167B653"
 ~%2FSCRATCH%2Ffpan%2FData%2FR_script%2FFastaGtf_preProcessing.R="3346F1EA"
 ~%2FSCRATCH%2Ffpan%2FData%2FR_script%2FGeneAdd.R="C644E52D"
+~%2FSCRATCH%2Ffpan%2FData%2FR_script%2FMainAnalysis%2Fquarto.qmd="5261556A"
 ~%2FSCRATCH%2Ffpan%2FData%2FR_script%2FMergingCountMatrixFromFeatureCount.R="0FF3A986"
 ~%2FSCRATCH%2Ffpan%2FData%2FR_script%2FModifyingGtfForRsem.R="6C1F072A"
 ~%2FSCRATCH%2Ffpan%2FData%2FR_script%2FPCA_Visualisation.R="756EE076"
