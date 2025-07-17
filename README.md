@@ -8,6 +8,9 @@ Pour garantir une reproductibilité complète :
 
 ## Structure des dossiers
 
+### `FLowchart/`
+Contient un schéma de des étapes du travail effectué 
+
 ### `Analysis/`
 
 - Contient la liste de tous les **gènes différentiellement exprimés (DEGs)** identifiés dans l’étude.
