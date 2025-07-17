@@ -3,7 +3,7 @@
 Ce dépôt contient tous les scripts et résultats issus de l’étude sur le rôle de l’histone H1.
 
 Pour garantir la reproductibilité :
-- Utilisez le fichier `r44_env.yml` pour créer l’environnement **Conda** utilisé lors de l’analyse avec **R version 4.4**. 
+- Utilisez le fichier `r44_env.yml` pour créer un environnement **Conda** avec **R version 4.4**. 
 - En activant l'environnement conda, lancer Rstudio dans le terminal pour être sous R v4.4 et utilisé `renv::restore()` en étant dans le dossier `R_script` .
 
 ## Structure des dossiers
