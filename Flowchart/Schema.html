@@ -133,10 +133,10 @@ ul.task-list li input[type="checkbox"] {
   fa5 --&gt; SAL
   SAL -- Using Final FastQ Files --&gt; Quant(Quantify Reads&lt;br/&gt;from&lt;br/&gt;FastQ Files)
   Quant --&gt; Q28(Sample's Quantification)
-  M16(TT-Seq SampleSheet) --&gt; K41(DESeq2&lt;br/&gt;LOW vs WT)
+  M16(RNA-Seq/TT-Seq&lt;br/&gt;SampleSheet) --&gt; K41(DESeq2&lt;br/&gt;LOW vs WT)
   L16(Control genes = Droso&lt;br/&gt;for&lt;br/&gt; EstimateSizeFactors) --&gt; K41
   Q28 --&gt; K41
-  K41 --&gt; R48(Salmon RNA-seq Results)
+  K41 --&gt; R48(Salmon RNA-seq/TT-Seq&lt;br/&gt;Results)
   R48 --&gt; U19(Analysis)
 
 linkStyle 0 stroke:orange,stroke-width:2px
@@ -233,34 +233,6 @@ linkStyle 10 stroke:black,stroke-width:2px
 linkStyle 11 stroke:black,stroke-width:2px
 
 
-</pre>
-</div>
-<p></p></figure><p></p>
-</div>
-</div>
-</div>
-<div class="cell" data-layout-align="default">
-<div class="cell-output-display">
-<div>
-<p></p><figure class="figure"><p></p>
-<div>
-<pre class="mermaid mermaid-js">graph LR
-
-  A(RNA-Seq – resp. TT-Seq&lt;br/&gt;n = 12) --&gt; C1(Colony 1 - C1&lt;br/&gt;n = 6)
-  A --&gt; C2(Colony - C2&lt;br/&gt; n = 6)
-  
-  C1 --&gt; WT1(Wild type - WT&lt;br/&gt;n = 3)
-  C1 --&gt; LOW1(LOW&lt;br/&gt;n = 3)
-  
-  C2 --&gt; WT2(Wild type - WT&lt;br/&gt;n = 3)
-  C2 --&gt; LOW2(LOW&lt;br/&gt;n = 3)
-  
-  WT1 --&gt; R1(Replicate 1 - Rep1&lt;br/&gt;n = 1)
-  WT1 --&gt; R2(Replicate 2 - Rep2&lt;br/&gt;n = 1)
-  WT1 --&gt; R3(Replicate 3 - Rep3&lt;br/&gt;n = 1)
-  LOW1 --3 Replicate--&gt; N1(...)
-  WT2 --3 Replicate--&gt; N2(...)
-  LOW2 --3 Replicate--&gt; N3(...)
 </pre>
 </div>
 <p></p></figure><p></p>

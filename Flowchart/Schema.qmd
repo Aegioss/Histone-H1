@@ -68,10 +68,10 @@ graph TD
   fa5 --> SAL
   SAL -- Using Final FastQ Files --> Quant(Quantify Reads<br/>from<br/>FastQ Files)
   Quant --> Q28(Sample's Quantification)
-  M16(TT-Seq SampleSheet) --> K41(DESeq2<br/>LOW vs WT)
+  M16(RNA-Seq/TT-Seq<br/>SampleSheet) --> K41(DESeq2<br/>LOW vs WT)
   L16(Control genes = Droso<br/>for<br/> EstimateSizeFactors) --> K41
   Q28 --> K41
-  K41 --> R48(Salmon RNA-seq Results)
+  K41 --> R48(Salmon RNA-seq/TT-Seq<br/>Results)
   R48 --> U19(Analysis)
 
 linkStyle 0 stroke:orange,stroke-width:2px
