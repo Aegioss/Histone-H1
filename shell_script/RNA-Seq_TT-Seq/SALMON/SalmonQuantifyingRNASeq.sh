@@ -20,10 +20,10 @@ input1=$(sed -n "${line1}p" /pasteur/appa/scratch/fpan/fastqc_filename.txt)
 input2=$(sed -n "${line2}p" /pasteur/appa/scratch/fpan/fastqc_filename.txt)
 rna_file=$(echo "$input1" | cut -d '.' -f1)
 
-salmon quant -i /pasteur/appa/scratch/fpan/Genome_Index/chR_index_files/SalmonRNA/SalmonRnaIndexAddedPreMrna -l A \
-         --geneMap /pasteur/appa/scratch/fpan/Genome_Index/chR_index_files/AddedMonoExPreMrna_13_06.gtf \
+salmon quant -i /pasteur/appa/scratch/fpan/Genome_Index/chR_index_files/SalmonRNA/SalmonRnaIndex -l A \
+         --geneMap /pasteur/appa/scratch/fpan/Genome_Index/chR_index_files/rsem_9_06_25_filtered.gtf \
          -1  /pasteur/appa/scratch/fpan/trimmed_output/$input1 \
          -2  /pasteur/appa/scratch/fpan/trimmed_output/$input2 \
          --gcBias \
          -p 16 \
-         -o /pasteur/appa/scratch/fpan/Genome_Index/chR_index_files/SalmonRNA/QuantOutput_AddedPreMrna/${rna_file}_quant
+         -o /pasteur/appa/scratch/fpan/Genome_Index/chR_index_files/SalmonRNA/QuantOutput_gcBias/${rna_file}_quant

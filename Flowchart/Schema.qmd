@@ -164,26 +164,6 @@ linkStyle 11 stroke:black,stroke-width:2px
 
 ```{mermaid}
 graph LR
-
-  A(RNA-Seq – resp. TT-Seq<br/>n = 12) --> C1(Colony 1 - C1<br/>n = 6)
-  A --> C2(Colony - C2<br/> n = 6)
-  
-  C1 --> WT1(Wild type - WT<br/>n = 3)
-  C1 --> LOW1(LOW<br/>n = 3)
-  
-  C2 --> WT2(Wild type - WT<br/>n = 3)
-  C2 --> LOW2(LOW<br/>n = 3)
-  
-  WT1 --> R1(Replicate 1 - Rep1<br/>n = 1)
-  WT1 --> R2(Replicate 2 - Rep2<br/>n = 1)
-  WT1 --> R3(Replicate 3 - Rep3<br/>n = 1)
-  LOW1 --3 Replicate--> N1(...)
-  WT2 --3 Replicate--> N2(...)
-  LOW2 --3 Replicate--> N3(...)
-```
-
-```{mermaid}
-graph LR
   GTF(fichier GTF) --> Index(Index de l'aligneur)
   FASTA(fichier FASTA) --> Index
   FASTQ(fichier FastQ) --> M(Alignement)

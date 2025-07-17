@@ -1,0 +1,34 @@
+name: rnaseq_env
+channels:
+  - conda-forge
+  - bioconda
+  - defaults
+dependencies:
+  - qualimap
+  - stringtie
+  - umi_tools
+  - bioconductor-deseq2
+  - seqtk
+  - subread
+  - samtools
+  - bedtools
+  - bioconductor-limma
+  - kraken2
+  - trimmomatic
+  - bioconductor-edger
+  - cutadapt
+  - hisat2
+  - star
+  - salmon
+  - fastqc
+  - multiqc
+  - bowtie2
+  - nextflow
+  - bbmap
+  - picard
+  - htseq
+  - rsem
+  - python=3.10
+  - apptainer
+  - deeptools
+

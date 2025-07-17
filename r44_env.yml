@@ -1,0 +1,23 @@
+name: r44
+channels:
+  - defaults
+dependencies:
+  - r-rcolorbrewer
+  - r-remotes
+  - r-reshape2
+  - bioconductor-deseq2
+  - r-base=4.4
+  - r-viridis
+  - r-patchwork
+  - bioconductor-tximport
+  - r-ggrepel
+  - r-pheatmap
+  - r-readr
+  - bioconductor-karyoploter
+  - r-biocmanager
+  - bioconductor-rtracklayer
+  - bioconductor-tximportdata
+  - r-tidyverse
+  - samtools
+  - r-data.table
+

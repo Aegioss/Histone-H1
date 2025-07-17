@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --qos=normal
-#SBATCH --array=25-28
+#SBATCH --array=1-28
 #SBATCH --ntasks=1
 #SBATCH --job-name=bigwig
 #SBATCH --mail-user=franck.pan@pasteur.fr

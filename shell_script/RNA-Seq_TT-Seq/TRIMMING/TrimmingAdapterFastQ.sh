@@ -1,10 +1,10 @@
 #!/bin/bash
 #SBATCH --qos=normal
-#SBATCH --array=1,2,4,5,6,8
-#SBATCH --job-name=Flt
+#SBATCH --array=1-28
+#SBATCH --job-name=Filtering_%A_%a
 #SBATCH --output=logs_trimgalore/output_%A_%a.out
 #SBATCH --error=logs_trimgalore/error_%A_%a.err
-#SBATCH --mem=20000
+#SBATCH --mem=10000
 #SBATCH --cpus-per-task=4
 
 FILES=$(ls /pasteur/appa/scratch/fpan/Ashish)
