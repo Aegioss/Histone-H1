@@ -8,7 +8,7 @@ Pour garantir la reproductibilité :
 
 ## Structure des dossiers
 
-### `FLowchart/`
+### `Flowchart/`
 Contient un schéma des étapes du travail effectué.
 
 ### `Analysis/`
