@@ -9,7 +9,7 @@ Pour garantir une reproductibilité complète :
 ## Structure des dossiers
 
 ### `FLowchart/`
-Contient un schéma de des étapes du travail effectué.
+Contient un schéma des étapes du travail effectué.
 
 ### `Analysis/`
 
